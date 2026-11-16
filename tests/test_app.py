@@ -131,3 +131,31 @@ def test_story_request_enters_queue_and_completes_with_a_local_llm(monkeypatch, 
             time.sleep(.02)
         assert job["status"] == "completed"
         assert job["story"]["video"] == "story.mp4"
+
+
+def test_creator_plan_request_enters_queue(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "runtime"))
+    monkeypatch.setenv("LOCAL_LLM_URL", "http://local-ollama.test/v1")
+    monkeypatch.setattr(
+        "app.jobs.run_plan_pipeline",
+        lambda *_: {"positioning": "Тест", "content_pillars": [], "schedule": [], "metrics_focus": [], "publish_checklist": [], "plan_days": 7, "file": "creator-plan.md"},
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/plans",
+            json={
+                "niche": "Оригинальные истории", "audience": "Зрители коротких видео",
+                "content_focus": "stories", "platforms": ["youtube_shorts", "tiktok"],
+                "plan_days": 7, "language": "ru", "cloud_processing_allowed": False,
+            },
+        )
+        assert response.status_code == 202, response.text
+        job_id = response.json()["id"]
+        for _ in range(30):
+            job = client.get(f"/api/jobs/{job_id}").json()
+            if job["status"] == "completed":
+                break
+            time.sleep(.02)
+        assert job["kind"] == "plan"
+        assert job["status"] == "completed"
+        assert job["plan"]["file"] == "creator-plan.md"

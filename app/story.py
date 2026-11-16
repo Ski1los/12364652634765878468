@@ -74,8 +74,10 @@ def _story_prompt(job: dict[str, Any]) -> str:
 Верни ТОЛЬКО валидный JSON-объект:
 {{
  "title":"короткий заголовок до 70 символов",
+ "titles":["3 честных варианта заголовка до 70 символов"],
  "hook":"первая фраза до 110 символов",
  "description":"описание для публикации до 280 символов с пометкой AI-assisted / создано с помощью ИИ",
+ "platform_captions":{{"youtube_shorts":"подпись до 180 символов","tiktok":"подпись до 180 символов","instagram_reels":"подпись до 180 символов"}},
  "hashtags":["#тег1","#тег2","#тег3"],
  "disclosure":"Создано с помощью ИИ; история вымышленная.",
  "scenes":[
@@ -136,10 +138,31 @@ def generate_script(job: dict[str, Any], settings: Settings, log: Log) -> dict[s
         value = _as_text(tag, 40)
         if value:
             clean_tags.append(value if value.startswith("#") else "#" + value.replace(" ", ""))
+    title = _as_text(data.get("title"), 70, "Новая история")
+    raw_titles = data.get("titles") if isinstance(data.get("titles"), list) else []
+    title_variants: list[str] = []
+    for item in [title, *raw_titles]:
+        variant = _as_text(item, 70)
+        if variant and variant not in title_variants:
+            title_variants.append(variant)
+    # A useful content kit should still have alternatives when a smaller LLM omits the new field.
+    for fallback in (f"{title}: короткая история", f"Что произошло после этого? — {title}"):
+        if len(title_variants) >= 3:
+            break
+        if fallback not in title_variants:
+            title_variants.append(fallback[:70])
+    raw_captions = data.get("platform_captions") if isinstance(data.get("platform_captions"), dict) else {}
+    description = _as_text(data.get("description"), 280, "Создано с помощью ИИ.")
+    captions = {
+        platform: _as_text(raw_captions.get(platform), 220, description)
+        for platform in ("youtube_shorts", "tiktok", "instagram_reels")
+    }
     return {
-        "title": _as_text(data.get("title"), 70, "Новая история"),
+        "title": title,
+        "titles": title_variants[:3],
         "hook": _as_text(data.get("hook"), 110, scenes[0]["narration"][:110]),
-        "description": _as_text(data.get("description"), 280, "Создано с помощью ИИ."),
+        "description": description,
+        "platform_captions": captions,
         "hashtags": clean_tags[:8],
         "disclosure": _as_text(data.get("disclosure"), 160, "Создано с помощью ИИ; история вымышленная."),
         "scenes": scenes,
@@ -180,6 +203,40 @@ def _draw_centered(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], te
     x = left + ((right - left) - (bounds[2] - bounds[0])) / 2
     y = top + max(0, ((bottom - top) - (bounds[3] - bounds[1])) / 2)
     draw.multiline_text((x, y), wrapped, font=font, fill=fill, spacing=spacing, align="center")
+
+
+def create_cover_image(story: dict[str, Any], output_dir: Path, height: int) -> Path:
+    """Generate an original square/vertical-safe cover without external imagery."""
+    output_dir.mkdir(parents=True, exist_ok=True)
+    width = int(round(height * 9 / 16 / 2) * 2)
+    dark, accent, pale = PALETTES[0]
+    image = Image.new("RGB", (width, height), dark)
+    draw = ImageDraw.Draw(image)
+    draw.ellipse((-width // 2, -height // 6, width * 3 // 4, height * 3 // 5), fill=accent)
+    draw.ellipse((width // 3, height // 2, width + width // 2, height + height // 4), fill="#07151a")
+    margin = round(width * .085)
+    draw.rounded_rectangle((margin, round(height * .08), width - margin, round(height * .16)), radius=12, fill="#101f27")
+    draw.text((margin + 15, round(height * .103)), "CLIPLAB ORIGINAL STORY", font=_font(max(15, round(height * .017)), bold=True), fill=pale)
+    _draw_centered(
+        draw,
+        (margin, round(height * .25), width - margin, round(height * .62)),
+        story["title"],
+        _font(max(34, round(height * .056)), bold=True),
+        "#ffffff",
+        spacing=round(height * .012),
+    )
+    draw.line((margin, round(height * .71), width - margin, round(height * .71)), fill="#dfff38", width=max(4, round(height * .005)))
+    _draw_centered(
+        draw,
+        (margin, round(height * .75), width - margin, round(height * .88)),
+        story["hook"],
+        _font(max(17, round(height * .021))),
+        pale,
+        spacing=round(height * .006),
+    )
+    path = output_dir / "cover.png"
+    image.save(path, optimize=True)
+    return path
 
 
 def create_scene_cards(story: dict[str, Any], output_dir: Path, height: int) -> list[Path]:
@@ -275,6 +332,7 @@ def render_story(story: dict[str, Any], job: dict[str, Any], settings: Settings,
     voice_engine = synthesize_narration(narration, job["language"], voice_file, settings, log)
     audio_duration = probe_duration(voice_file, log)
     words, scene_durations = _story_words(story, audio_duration)
+    cover = create_cover_image(story, output_dir, height)
     cards = create_scene_cards(story, output_dir, height)
     concat = output_dir / "scenes.txt"
     _concat_file(cards, scene_durations, concat)
@@ -304,6 +362,7 @@ def render_story(story: dict[str, Any], job: dict[str, Any], settings: Settings,
         "video": output_video.name,
         "subtitles": srt_file.name,
         "audio": voice_file.name,
+        "thumbnail": cover.name,
         "duration": round(audio_duration, 2),
         "voice_engine": voice_engine,
     }
@@ -311,14 +370,25 @@ def render_story(story: dict[str, Any], job: dict[str, Any], settings: Settings,
 
 def write_content_pack(story: dict[str, Any], story_render: dict[str, Any], target: Path) -> None:
     hashtag_line = " ".join(story["hashtags"])
-    body = f"""TITLE
-{story['title']}
+    titles = "\n".join(f"{index}. {item}" for index, item in enumerate(story.get("titles", [story["title"]]), start=1))
+    captions = story.get("platform_captions", {})
+    body = f"""TITLE OPTIONS
+{titles}
 
 HOOK
 {story['hook']}
 
 DESCRIPTION
 {story['description']}
+
+YOUTUBE SHORTS CAPTION
+{captions.get('youtube_shorts', story['description'])}
+
+TIKTOK CAPTION
+{captions.get('tiktok', story['description'])}
+
+INSTAGRAM REELS CAPTION
+{captions.get('instagram_reels', story['description'])}
 
 HASHTAGS
 {hashtag_line}

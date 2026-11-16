@@ -28,6 +28,7 @@
     <nav class="tool-tabs" aria-label="Инструменты">
       <button class="tool-tab is-active" type="button" data-panel="clip-studio"><span>✂</span> Нарезка видео</button>
       <button class="tool-tab" type="button" data-panel="story-studio"><span>✦</span> Story Studio <small>LOCAL AI</small></button>
+      <button class="tool-tab" type="button" data-panel="plan-studio"><span>▦</span> Creator Plan <small>7 / 14 ДНЕЙ</small></button>
     </nav>
 
     <section id="clip-studio" class="tool-panel workspace" aria-label="Нарезать видео">
@@ -127,6 +128,33 @@
         <div class="output-list"><div><b>01</b><span>Оригинальный сценарий из 5–8 сцен</span></div><div><b>02</b><span>WAV-озвучка и готовый MP4</span></div><div><b>03</b><span>SRT, заголовок, описание и хэштеги</span></div></div>
         <p class="honest-note">Автогенерация не гарантирует просмотры или доход. Перед публикацией проверьте факты, качество и правила платформы.</p>
       </aside>
+    </section>
+
+    <section id="plan-studio" class="tool-panel plan-studio" hidden aria-label="Создать контент-план">
+      <form id="plan-form" class="card plan-form">
+        <div class="studio-head"><div><div class="card-kicker">CREATOR PLAN</div><h2>Снимайте с идеей,<br />а не наугад.</h2></div><span class="local-badge">EDITORIAL</span></div>
+        <p class="story-lead">План не обещает доход или просмотры. Он помогает собрать честную стратегию, календарь оригинальных роликов и понятный чек-лист публикации под вашу нишу.</p>
+        <div class="plan-field-grid">
+          <label>Ниша или тема канала<textarea id="plan-niche" required minlength="3" maxlength="180" placeholder="Например: короткие вымышленные истории о неожиданных поступках"></textarea></label>
+          <label>Для кого контент<textarea id="plan-audience" required minlength="3" maxlength="180" placeholder="Например: зрители 18–30, которым нравятся спокойные истории перед сном"></textarea></label>
+        </div>
+        <div class="story-grid plan-controls">
+          <label>Фокус
+            <select id="plan-focus"><option value="stories">Оригинальные истории</option><option value="education">Лёгкое объяснение</option><option value="commentary">Развлекательный комментарий</option></select>
+          </label>
+          <label>Период
+            <select id="plan-days"><option value="7">7 дней</option><option value="14">14 дней</option></select>
+          </label>
+          <label>Язык
+            <select id="plan-language"><option value="ru">Русский</option><option value="en">English</option></select>
+          </label>
+        </div>
+        <fieldset class="platforms-fieldset"><legend>Где планируете публиковать</legend><div class="platform-pills"><label><input type="checkbox" name="plan-platform" value="youtube_shorts" checked /><span>YouTube Shorts</span></label><label><input type="checkbox" name="plan-platform" value="tiktok" checked /><span>TikTok</span></label><label><input type="checkbox" name="plan-platform" value="instagram_reels" checked /><span>Instagram Reels</span></label></div></fieldset>
+        <label id="cloud-plan-consent" class="consent cloud-consent" hidden><input id="cloud-plan-allowed" type="checkbox" /><span>Разрешаю отправить нишу, аудиторию и инструкцию в выбранный облачный LLM для создания контент-плана.</span></label>
+        <div id="plan-error" class="form-error" role="alert" hidden></div>
+        <button id="plan-submit" class="submit" type="submit"><span>Собрать план на неделю</span><b>→</b></button>
+      </form>
+      <aside class="card plan-preview"><div class="card-kicker">В ПЛАНЕ БУДЕТ</div><div class="calendar-mock"><div><b>01</b><span>Название и честный хук</span></div><div><b>02</b><span>Формат: Story Reel или Clip Finder</span></div><div><b>03</b><span>CTA и заметка для съёмки</span></div><div><b>04</b><span>Метрики и чек-лист проверки</span></div></div><p class="honest-note">Используйте план как редакторский черновик: выбирайте идеи, которые вы реально можете сделать качественно, а не публикуйте всё без проверки.</p></aside>
     </section>
 
     <section class="jobs-section" aria-live="polite">

@@ -89,4 +89,5 @@ def test_story_render_assembles_local_assets_without_cloud(monkeypatch, tmp_path
     result = render_story(story, {"render_height": 720, "language": "ru"}, settings, tmp_path, lambda _: None)
     assert result["video"] == "story-reel.mp4"
     assert (tmp_path / result["subtitles"]).is_file()
+    assert (tmp_path / result["thumbnail"]).is_file()
     assert any("zoompan" in command[command.index("-vf") + 1] for command in commands if "-vf" in command)

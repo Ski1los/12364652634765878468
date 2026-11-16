@@ -4,17 +4,19 @@ from __future__ import annotations
 import threading
 import traceback
 import uuid
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 from .pipeline import PipelineError, remove_job_files, run_pipeline
+from .planner import run_plan_pipeline
 from .story import run_story_pipeline
 from .settings import Settings
 from .storage import read_json, write_json
 
-ACTIVE_STATES = {"queued", "downloading", "transcribing", "selecting", "rendering", "drafting", "narrating", "composing"}
+ACTIVE_STATES = {"queued", "downloading", "transcribing", "selecting", "rendering", "drafting", "narrating", "composing", "planning"}
 
 
 def now() -> str:
@@ -102,6 +104,33 @@ class JobManager:
         self._executor.submit(self._work, job_id)
         return self.public_job(job)
 
+    def create_plan(self, payload: dict[str, Any]) -> dict[str, Any]:
+        job_id = uuid.uuid4().hex
+        job = {
+            "id": job_id,
+            "kind": "plan",
+            "niche": payload["niche"],
+            "audience": payload["audience"],
+            "content_focus": payload["content_focus"],
+            "platforms": payload["platforms"],
+            "plan_days": payload["plan_days"],
+            "language": payload["language"],
+            "cloud_processing_allowed": payload.get("cloud_processing_allowed", False),
+            "status": "queued",
+            "stage": "queued",
+            "progress": 0,
+            "error": None,
+            "plan": None,
+            "logs": [{"at": now(), "message": "Контент-план добавлен в локальную очередь."}],
+            "created_at": now(),
+            "updated_at": now(),
+        }
+        with self._lock:
+            self._jobs[job_id] = job
+            self._save(job)
+        self._executor.submit(self._work, job_id)
+        return self.public_job(job)
+
     def _update(self, job_id: str, **changes: Any) -> None:
         with self._lock:
             job = self._jobs[job_id]
@@ -131,6 +160,8 @@ class JobManager:
                 self._set_stage(job_id, "transcribing", 35)
             elif "ищу потенциально" in lower or "языковая модель" in lower:
                 self._set_stage(job_id, "selecting", 58)
+            elif "составляет реалистичный контент-план" in lower:
+                self._set_stage(job_id, "planning", 45)
             elif "локальная llm пишет" in lower or "облачная llm пишет" in lower:
                 self._set_stage(job_id, "drafting", 22)
             elif "озвучиваю" in lower:
@@ -147,6 +178,9 @@ class JobManager:
             if snapshot.get("kind") == "story":
                 story = run_story_pipeline(snapshot, self.settings, log)
                 self._update(job_id, status="completed", stage="completed", progress=100, story=story, error=None)
+            elif snapshot.get("kind") == "plan":
+                plan = run_plan_pipeline(snapshot, self.settings, log)
+                self._update(job_id, status="completed", stage="completed", progress=100, plan=plan, error=None)
             else:
                 clips = run_pipeline(snapshot, self.settings, log)
                 self._update(job_id, status="completed", stage="completed", progress=100, clips=clips, error=None)
@@ -196,3 +230,27 @@ class JobManager:
         if output_dir not in path.parents or not path.is_file():
             return None
         return path
+
+    def archive_path(self, job_id: str) -> Path | None:
+        """Build a compact creator kit without exposing sources or internal job state."""
+        with self._lock:
+            job = self._jobs.get(job_id)
+        if not job or job.get("status") != "completed":
+            return None
+        output_dir = (self.settings.jobs_dir / job_id / "output").resolve()
+        if not output_dir.is_dir():
+            return None
+        archive = output_dir / "download-all.zip"
+        allowed = {".mp4", ".srt", ".wav", ".txt", ".md", ".png", ".jpg", ".json"}
+        try:
+            with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6) as bundle:
+                for candidate in sorted(output_dir.rglob("*")):
+                    if not candidate.is_file() or candidate == archive or candidate.suffix.lower() not in allowed:
+                        continue
+                    # Skip low-level scene caches: the export should be ready to publish, not huge.
+                    if "scenes" in candidate.parts or candidate.name in {"visuals.mp4", "story.ass", "scenes.txt"}:
+                        continue
+                    bundle.write(candidate, candidate.relative_to(output_dir))
+        except OSError:
+            return None
+        return archive if archive.is_file() else None

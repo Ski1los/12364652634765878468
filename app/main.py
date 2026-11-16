@@ -36,6 +36,23 @@ class CreateStory(BaseModel):
         return self
 
 
+class CreatePlan(BaseModel):
+    niche: str = Field(min_length=3, max_length=180)
+    audience: str = Field(min_length=3, max_length=180)
+    content_focus: Literal["stories", "education", "commentary"] = "stories"
+    platforms: list[Literal["youtube_shorts", "tiktok", "instagram_reels"]] = Field(min_length=1, max_length=3)
+    plan_days: Literal[7, 14] = 7
+    language: Literal["ru", "en"] = "ru"
+    cloud_processing_allowed: bool = False
+
+    @model_validator(mode="after")
+    def normalise_fields(self) -> "CreatePlan":
+        self.niche = " ".join(self.niche.split())
+        self.audience = " ".join(self.audience.split())
+        self.platforms = list(dict.fromkeys(self.platforms))
+        return self
+
+
 class CreateJob(BaseModel):
     source_url: str = Field(min_length=12, max_length=2000)
     clip_count: int = Field(default=3, ge=1, le=8)
@@ -128,6 +145,19 @@ def create_story(payload: CreateStory) -> dict:
     return manager.create_story(payload.model_dump(exclude={"ai_disclosure_confirmed"}))
 
 
+@app.post("/api/plans", status_code=202)
+def create_plan(payload: CreatePlan) -> dict:
+    target = settings.active_llm
+    if not target:
+        raise HTTPException(status_code=409, detail="Контент-план требует локальную LLM или настроенный cloud endpoint.")
+    if target.is_cloud and not payload.cloud_processing_allowed:
+        raise HTTPException(
+            status_code=422,
+            detail="Подтвердите передачу ниши, аудитории и инструкции в выбранный облачный LLM-сервис.",
+        )
+    return manager.create_plan(payload.model_dump())
+
+
 @app.get("/api/jobs")
 def list_jobs() -> list[dict]:
     return manager.list()
@@ -161,3 +191,11 @@ def get_file(job_id: str, filename: str) -> FileResponse:
     # No Content-Disposition: attachment here: the same endpoint is used by <video>.
     # The UI's explicit download links carry the HTML `download` attribute.
     return FileResponse(path, media_type=media_type)
+
+
+@app.get("/api/jobs/{job_id}/download-all")
+def download_all(job_id: str) -> FileResponse:
+    archive = manager.archive_path(job_id)
+    if not archive:
+        raise HTTPException(status_code=404, detail="Архив доступен только для завершённой задачи.")
+    return FileResponse(archive, media_type="application/zip", filename="cliplab-creator-kit.zip")
