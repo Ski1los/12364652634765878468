@@ -81,4 +81,5 @@ def test_download_source_has_size_and_duration_guardrails(monkeypatch, tmp_path)
 def test_tls_downloader_error_has_an_actionable_message():
     assert "HTTPS-соединение" in downloader_network_error("TLS/SSL connection has been closed (EOF)")
     assert "HTTPS-соединение" in downloader_network_error("curl: (35) BoringSSL SSL_connect: Connection closed abruptly")
+    assert "DNS-адрес" in downloader_network_error("curl: (6) Could not resolve host: www.youtube.com")
     assert downloader_network_error("video unavailable") is None

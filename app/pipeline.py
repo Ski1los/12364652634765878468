@@ -144,6 +144,17 @@ def downloader_network_error(message: str) -> str | None:
     """Turn noisy yt-dlp transport output into an actionable user-facing diagnostic."""
     lowered = message.lower()
     if any(marker in lowered for marker in (
+        "could not resolve host", "dns server returned", "name or service not known",
+        "temporary failure in name resolution",
+    )):
+        return (
+            "Сервер не может разрешить DNS-адрес YouTube. Это проблема DNS/интернета у сервера "
+            "или Docker, а не видео и не Whisper. В preview-песочнице внешние видеохостинги могут "
+            "быть недоступны. На своём Windows-ПК проверьте, что YouTube открывается в браузере, "
+            "перезапустите Docker Desktop и контейнер. Если ошибка остаётся только в Docker — "
+            "настройте разрешённый DNS/прокси вашей сети; не добавляйте случайный proxy."
+        )
+    if any(marker in lowered for marker in (
         "tls/ssl connection", "sslerror", "ssl_error_syscall", "certificate verify",
         "connection has been closed", "connection closed abruptly",
     )):
