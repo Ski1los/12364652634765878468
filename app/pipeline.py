@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import math
-import os
 import re
 import shutil
 import subprocess
@@ -18,8 +17,8 @@ from pathlib import Path
 from typing import Callable, Iterable
 from urllib.parse import urlparse
 
-import requests
-
+from .errors import PipelineError
+from .llm import chat_completion
 from .settings import Settings
 from .storage import write_json
 
@@ -36,10 +35,6 @@ REACTIONS = re.compile(
     r"what|no way|wait|oh my|really|damn|wtf|why)",
     re.IGNORECASE,
 )
-
-
-class PipelineError(RuntimeError):
-    """A user-facing pipeline failure."""
 
 
 @dataclass
@@ -131,8 +126,15 @@ def download_source(url: str, source_dir: Path, settings: Settings, log: Log) ->
         sys.executable, "-m", "yt_dlp",
         "--no-playlist", "--no-progress", "--restrict-filenames",
         "--merge-output-format", "mp4", "--remux-video", "mp4",
-        "-f", "bv*+ba/b", "-o", template, url,
+        "-f", "bv*+ba/b", "-o", template,
     ]
+    # A weak CPU can be made unusable by an accidental multi-hour VOD or 40 GB source.
+    # Set either value to 0 in .env to explicitly remove that guard.
+    if settings.max_source_minutes:
+        command.extend(["--match-filter", f"duration <= {settings.max_source_minutes * 60}"])
+    if settings.max_source_mb:
+        command.extend(["--max-filesize", f"{settings.max_source_mb}M"])
+    command.append(url)
     if settings.ytdlp_cookies_file:
         cookie_path = Path(settings.ytdlp_cookies_file)
         if cookie_path.is_file():
@@ -148,6 +150,11 @@ def download_source(url: str, source_dir: Path, settings: Settings, log: Log) ->
                 "YouTube запросил проверку доступа. Обновите yt-dlp и, если у вас есть право "
                 "просмотра, укажите Netscape cookies через YTDLP_COOKIES_FILE."
             ) from error
+        if "does not pass" in message or "max-filesize" in message.lower():
+            raise PipelineError(
+                "Источник превышает безопасный лимит этого профиля. Измените MAX_SOURCE_MINUTES "
+                "или MAX_SOURCE_MB в .env, если на диске достаточно места."
+            ) from error
         raise
     files = [path for path in source_dir.iterdir() if path.is_file() and path.suffix.lower() in {".mp4", ".mkv", ".webm", ".mov"}]
     if not files:
@@ -162,12 +169,17 @@ def transcribe(source: Path, settings: Settings, log: Log) -> list[Word]:
     except ImportError as error:  # Defensive: it is a declared dependency.
         raise PipelineError("Не найден faster-whisper. Пересоберите контейнер.") from error
 
-    log(f"Загружаю локальную Whisper-модель {settings.whisper_model} (первый запуск может занять время)…")
+    log(
+        f"Загружаю локальную Whisper-модель {settings.whisper_model} "
+        f"({settings.whisper_cpu_threads} CPU-потоков, {settings.whisper_compute_type}; первый запуск может занять время)…"
+    )
     try:
         model = WhisperModel(
             settings.whisper_model,
-            device="cpu",
-            compute_type="int8",
+            device=settings.whisper_device,
+            compute_type=settings.whisper_compute_type,
+            cpu_threads=settings.whisper_cpu_threads,
+            num_workers=1,
             download_root=str(settings.model_cache_dir),
         )
         segments, info = model.transcribe(
@@ -278,9 +290,20 @@ def _extract_json(text: str) -> object | None:
     return None
 
 
-def choose_with_local_llm(candidates: list[Candidate], wanted: int, settings: Settings, log: Log) -> list[Candidate] | None:
-    """Ask an OpenAI-compatible *local* LLM to rank candidates; safely fall back."""
-    if not settings.local_llm_url:
+def choose_with_configured_llm(
+    candidates: list[Candidate],
+    wanted: int,
+    settings: Settings,
+    log: Log,
+    *,
+    allow_cloud: bool,
+) -> list[Candidate] | None:
+    """Rank candidates with the configured model, preserving local-only as default."""
+    target = settings.active_llm
+    if not target:
+        return None
+    if target.is_cloud and not allow_cloud:
+        log("Облачный смысловой выбор отключён: разрешение на передачу краткого текста не дано; использую локальный скоринг.")
         return None
     shortlist = sorted(candidates, key=lambda item: item.score, reverse=True)[:80]
     digest = "\n".join(
@@ -292,22 +315,18 @@ def choose_with_local_llm(candidates: list[Candidate], wanted: int, settings: Se
         f"номера из списка. Нужны {wanted} непересекающихся фрагментов. Верни только JSON-массив "
         "объектов вида {\"id\": 3, \"title\": \"короткий заголовок\", \"reason\": \"почему\"}.\n\n" + digest
     )
-    log("Локальная языковая модель оценивает смысл и реакции…")
+    location = "Облачная" if target.is_cloud else "Локальная"
+    log(f"{location} языковая модель оценивает смысл и реакции…")
     try:
-        response = requests.post(
-            settings.local_llm_url + "/chat/completions",
-            json={
-                "model": settings.local_llm_model,
-                "messages": [
-                    {"role": "system", "content": "Отвечай только корректным JSON, без markdown."},
-                    {"role": "user", "content": prompt},
-                ],
-                "temperature": 0.2,
-            },
+        content = chat_completion(
+            target,
+            [
+                {"role": "system", "content": "Отвечай только корректным JSON, без markdown."},
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.2,
             timeout=180,
         )
-        response.raise_for_status()
-        content = response.json()["choices"][0]["message"]["content"]
         result = _extract_json(content)
         if not isinstance(result, list):
             raise ValueError("модель не вернула JSON-массив")
@@ -328,7 +347,7 @@ def choose_with_local_llm(candidates: list[Candidate], wanted: int, settings: Se
             return picks
         raise ValueError("модель не выбрала валидные фрагменты")
     except Exception as error:
-        log(f"Локальная LLM недоступна или дала неверный ответ ({error}); использую локальный скоринг.")
+        log(f"{location} LLM недоступна или дала неверный ответ ({error}); использую локальный скоринг.")
         return None
 
 
@@ -396,7 +415,16 @@ def write_captions(words: list[Word], clip_start: float, width: int, height: int
     ass_file.write_text("\n".join(ass_lines) + "\n", encoding="utf-8")
 
 
-def render_clip(source: Path, candidate: Candidate, all_words: list[Word], clip_number: int, output_dir: Path, height: int, log: Log) -> dict:
+def render_clip(
+    source: Path,
+    candidate: Candidate,
+    all_words: list[Word],
+    clip_number: int,
+    output_dir: Path,
+    height: int,
+    settings: Settings,
+    log: Log,
+) -> dict:
     width = int(round(height * 9 / 16 / 2) * 2)
     clip_name = f"clip-{clip_number:02}"
     mp4_file = output_dir / f"{clip_name}.mp4"
@@ -416,7 +444,7 @@ def render_clip(source: Path, candidate: Candidate, all_words: list[Word], clip_
     command = [
         "ffmpeg", "-y", "-ss", f"{candidate.start:.3f}", "-i", str(source), "-t", f"{duration:.3f}",
         "-filter_complex", filters, "-map", "[video]", "-map", "0:a?",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        "-threads", str(settings.ffmpeg_threads), "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
         "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", str(mp4_file),
     ]
     log(f"Рендер {clip_number}: {candidate.start:.0f}–{candidate.end:.0f} сек, вертикальное видео с субтитрами…")
@@ -455,14 +483,20 @@ def run_pipeline(job: dict, settings: Settings, log: Log) -> list[dict]:
     candidates = build_candidates(words, job["min_seconds"], job["max_seconds"])
     if not candidates:
         raise PipelineError("Не удалось собрать фрагменты нужной длительности из распознанной речи.")
-    llm_picks = choose_with_local_llm(candidates, job["clip_count"], settings, log)
+    llm_picks = choose_with_configured_llm(
+        candidates,
+        job["clip_count"],
+        settings,
+        log,
+        allow_cloud=bool(job.get("cloud_processing_allowed")),
+    )
     selected = non_overlapping_best(llm_picks or candidates, job["clip_count"])
     if not selected:
         raise PipelineError("Не удалось выбрать непересекающиеся моменты.")
     log(f"Выбрано моментов: {len(selected)} из {len(candidates)} кандидатов.")
 
     clips = [
-        render_clip(source, candidate, words, index, output_dir, job["render_height"], log)
+        render_clip(source, candidate, words, index, output_dir, job["render_height"], settings, log)
         for index, candidate in enumerate(selected, start=1)
     ]
     write_json(output_dir / "clips.json", clips)

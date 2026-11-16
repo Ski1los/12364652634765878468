@@ -13,10 +13,11 @@ import subprocess
 from pathlib import Path
 from typing import Any, Callable
 
-import requests
 from PIL import Image, ImageDraw, ImageFont
 
-from .pipeline import PipelineError, Word, probe_duration, run_command, write_captions
+from .errors import PipelineError
+from .llm import chat_completion
+from .pipeline import Word, probe_duration, run_command, write_captions
 from .settings import Settings
 from .storage import write_json
 
@@ -85,29 +86,28 @@ def _story_prompt(job: dict[str, Any]) -> str:
 
 
 def generate_script(job: dict[str, Any], settings: Settings, log: Log) -> dict[str, Any]:
-    if not settings.local_llm_url:
+    target = settings.active_llm
+    if not target:
         raise PipelineError(
-            "Story Studio требует локальную LLM для оригинального сценария. Включите Ollama: "
-            "LOCAL_LLM_URL=http://ollama:11434/v1 и скачайте модель, например qwen2.5:7b."
+            "Story Studio требует локальную или явно настроенную облачную LLM. Для локального режима "
+            "включите Ollama: LOCAL_LLM_URL=http://ollama:11434/v1 и скачайте qwen2.5:3b."
         )
-    log("Локальная LLM пишет оригинальный сценарий и пакет публикации…")
-    try:
-        response = requests.post(
-            settings.local_llm_url + "/chat/completions",
-            json={
-                "model": settings.local_llm_model,
-                "messages": [
-                    {"role": "system", "content": "Отвечай только корректным JSON без markdown."},
-                    {"role": "user", "content": _story_prompt(job)},
-                ],
-                "temperature": 0.75,
-            },
-            timeout=240,
+    if target.is_cloud and not job.get("cloud_processing_allowed"):
+        raise PipelineError(
+            "Для облачного сценария нужно отдельное разрешение: тема и инструкция будут отправлены "
+            "в настроенный внешний OpenAI-совместимый сервис."
         )
-        response.raise_for_status()
-        raw = response.json()["choices"][0]["message"]["content"]
-    except Exception as error:
-        raise PipelineError(f"Локальная LLM не смогла написать сценарий: {error}") from error
+    location = "Облачная" if target.is_cloud else "Локальная"
+    log(f"{location} LLM пишет оригинальный сценарий и пакет публикации…")
+    raw = chat_completion(
+        target,
+        [
+            {"role": "system", "content": "Отвечай только корректным JSON без markdown."},
+            {"role": "user", "content": _story_prompt(job)},
+        ],
+        temperature=0.75,
+        timeout=240,
+    )
     data = _extract_json(raw)
     if not isinstance(data, dict):
         raise PipelineError("Локальная LLM вернула сценарий не в JSON-формате. Повторите задачу или смените модель.")
@@ -284,7 +284,7 @@ def render_story(story: dict[str, Any], job: dict[str, Any], settings: Settings,
         "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat),
         # Subtle Ken Burns movement keeps original local story cards from feeling like a slideshow.
         "-vf", f"zoompan=z='min(max(zoom,pzoom)+0.0006,1.075)':d=1:s={width}x{height}:fps=30,format=yuv420p",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", str(silent_video),
+        "-threads", str(settings.ffmpeg_threads), "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", str(silent_video),
     ], log)
     srt_file = output_dir / "story.srt"
     ass_file = output_dir / "story.ass"
@@ -295,7 +295,7 @@ def render_story(story: dict[str, Any], job: dict[str, Any], settings: Settings,
     run_command([
         "ffmpeg", "-y", "-i", str(silent_video), "-i", str(voice_file),
         "-vf", f"subtitles=filename='{subtitle}'", "-map", "0:v", "-map", "1:a", "-shortest",
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac", "-b:a", "160k",
+        "-threads", str(settings.ffmpeg_threads), "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac", "-b:a", "160k",
         "-movflags", "+faststart", str(output_video),
     ], log)
     if not output_video.is_file() or output_video.stat().st_size < 1024:

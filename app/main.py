@@ -25,6 +25,7 @@ class CreateStory(BaseModel):
     duration_seconds: Literal[30, 45, 60, 90] = 45
     visual_style: Literal["cinematic", "comic", "minimal"] = "cinematic"
     render_height: Literal[720, 1080] = 720
+    cloud_processing_allowed: bool = False
     ai_disclosure_confirmed: bool = False
 
     @model_validator(mode="after")
@@ -41,6 +42,7 @@ class CreateJob(BaseModel):
     min_seconds: int = Field(default=20, ge=10, le=90)
     max_seconds: int = Field(default=50, ge=15, le=150)
     render_height: Literal[720, 1080] = 720
+    cloud_processing_allowed: bool = False
     rights_confirmed: bool = False
 
     @model_validator(mode="after")
@@ -85,11 +87,18 @@ def health() -> dict[str, str]:
 
 @app.get("/api/config")
 def config() -> dict[str, object]:
+    target = settings.active_llm
     return {
         "whisper_model": settings.whisper_model,
+        "whisper_cpu_threads": settings.whisper_cpu_threads,
+        "ffmpeg_threads": settings.ffmpeg_threads,
         "local_llm_enabled": bool(settings.local_llm_url),
+        "llm_provider": target.provider if target else "none",
+        "story_ready": bool(target),
+        "cloud_consent_required": bool(target and target.is_cloud),
         "piper_voice_configured": bool(settings.piper_voice_model),
         "max_workers": settings.max_workers,
+        "source_limits": {"minutes": settings.max_source_minutes, "megabytes": settings.max_source_mb},
         "supported_sources": ["YouTube", "Twitch VOD / clips"],
     }
 
@@ -105,6 +114,17 @@ def create_job(payload: CreateJob) -> dict:
 
 @app.post("/api/stories", status_code=202)
 def create_story(payload: CreateStory) -> dict:
+    target = settings.active_llm
+    if not target:
+        raise HTTPException(
+            status_code=409,
+            detail="Story Studio требует локальную Ollama или настроенный облачный OpenAI-совместимый endpoint.",
+        )
+    if target.is_cloud and not payload.cloud_processing_allowed:
+        raise HTTPException(
+            status_code=422,
+            detail="Подтвердите передачу темы и инструкции в выбранный облачный LLM-сервис.",
+        )
     return manager.create_story(payload.model_dump(exclude={"ai_disclosure_confirmed"}))
 
 

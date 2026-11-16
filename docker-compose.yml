@@ -4,12 +4,24 @@ services:
     ports:
       - "8000:8000"
     environment:
-      # All processing stays on this machine. Change only if a local Ollama
-      # server is available; leaving it blank uses the deterministic local scorer.
       DATA_DIR: /data
-      WHISPER_MODEL: ${WHISPER_MODEL:-small}
+      # Ryzen 5 5600 / RX 580-safe defaults: CPU-only Whisper and a single job.
+      WHISPER_MODEL: ${WHISPER_MODEL:-base}
+      WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
+      WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
+      WHISPER_CPU_THREADS: ${WHISPER_CPU_THREADS:-6}
+      FFMPEG_THREADS: ${FFMPEG_THREADS:-6}
+      MAX_SOURCE_MINUTES: ${MAX_SOURCE_MINUTES:-120}
+      MAX_SOURCE_MB: ${MAX_SOURCE_MB:-3500}
       LOCAL_LLM_URL: ${LOCAL_LLM_URL:-}
-      LOCAL_LLM_MODEL: ${LOCAL_LLM_MODEL:-qwen2.5:7b}
+      LOCAL_LLM_MODEL: ${LOCAL_LLM_MODEL:-qwen2.5:3b}
+      LOCAL_LLM_API_KEY: ${LOCAL_LLM_API_KEY:-}
+      # Optional explicit cloud mode: only a user who ticks consent in the UI
+      # sends a Story idea/transcript digest to this OpenAI-compatible endpoint.
+      LLM_MODE: ${LLM_MODE:-auto}
+      CLOUD_LLM_URL: ${CLOUD_LLM_URL:-}
+      CLOUD_LLM_MODEL: ${CLOUD_LLM_MODEL:-}
+      CLOUD_LLM_API_KEY: ${CLOUD_LLM_API_KEY:-}
       MAX_WORKERS: ${MAX_WORKERS:-1}
       YTDLP_COOKIES_FILE: ${YTDLP_COOKIES_FILE:-}
       # Optional natural local Piper voice model, mounted from ./data/voices.
@@ -22,7 +34,7 @@ services:
   # Optional and entirely local. Start it with:
   #   docker compose --profile ai up -d
   # Then fetch a free local model once:
-  #   docker compose exec ollama ollama pull qwen2.5:7b
+  #   docker compose exec ollama ollama pull qwen2.5:3b
   # Set LOCAL_LLM_URL=http://ollama:11434/v1 in .env and restart clipper.
   ollama:
     image: ollama/ollama:latest

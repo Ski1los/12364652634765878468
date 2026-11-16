@@ -7,6 +7,9 @@ const storySubmit = document.querySelector('#story-submit');
 const jobsNode = document.querySelector('#jobs');
 const emptyNode = document.querySelector('#empty-state');
 const runtimeStatus = document.querySelector('#runtime-status');
+const hardwareProfile = document.querySelector('#hardware-profile');
+const cloudClipConsent = document.querySelector('#cloud-clip-consent');
+const cloudStoryConsent = document.querySelector('#cloud-story-consent');
 const activeStatuses = new Set(['queued','downloading','transcribing','selecting','rendering','drafting','narrating','composing']);
 let jobs = [];
 let pollTimer = null;
@@ -110,7 +113,7 @@ form.addEventListener('submit', async event => {
   const minSeconds = Number(document.querySelector('#min-seconds').value);
   const maxSeconds = Number(document.querySelector('#max-seconds').value);
   if (maxSeconds <= minSeconds) return showError(errorBox, 'Максимальная длительность должна быть больше минимальной.');
-  const payload = { source_url:document.querySelector('#source-url').value.trim(), clip_count:Number(document.querySelector('#clip-count').value), min_seconds:minSeconds, max_seconds:maxSeconds, render_height:Number(document.querySelector('#render-height').value), rights_confirmed:document.querySelector('#rights').checked };
+  const payload = { source_url:document.querySelector('#source-url').value.trim(), clip_count:Number(document.querySelector('#clip-count').value), min_seconds:minSeconds, max_seconds:maxSeconds, render_height:Number(document.querySelector('#render-height').value), rights_confirmed:document.querySelector('#rights').checked, cloud_processing_allowed:document.querySelector('#cloud-clip-allowed').checked };
   submitButton.disabled = true; submitButton.querySelector('span').textContent = 'Добавляю в очередь…';
   try {
     const response = await fetch('/api/jobs', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
@@ -122,11 +125,12 @@ form.addEventListener('submit', async event => {
 });
 storyForm.addEventListener('submit', async event => {
   event.preventDefault(); hideError(storyError);
-  if (config && !config.local_llm_enabled) return showError(storyError, 'Подключите локальную Ollama — Story Studio не отправляет идеи в платные облачные API. Инструкция есть в README.');
+  if (config && !config.story_ready) return showError(storyError, 'Настройте локальную Ollama или явный облачный OpenAI-совместимый endpoint. Инструкция и безопасные профили есть в README.');
   const payload = {
     topic:document.querySelector('#story-topic').value.trim(), story_kind:document.querySelector('#story-kind').value,
     language:document.querySelector('#story-language').value, duration_seconds:Number(document.querySelector('#story-duration').value),
     visual_style:document.querySelector('#story-style').value, render_height:Number(document.querySelector('#story-height').value),
+    cloud_processing_allowed:document.querySelector('#cloud-story-allowed').checked,
     ai_disclosure_confirmed:document.querySelector('#ai-disclosure').checked,
   };
   storySubmit.disabled = true; storySubmit.querySelector('span').textContent = 'Пишу и собираю…';
@@ -151,7 +155,16 @@ document.querySelector('#refresh').addEventListener('click', refresh);
   try {
     const response = await fetch('/api/config'); config = await response.json();
     const voice = config.piper_voice_configured ? 'Piper настроен' : 'eSpeak local';
-    runtimeStatus.textContent = `Whisper ${config.whisper_model} · ${config.local_llm_enabled ? 'Ollama подключена' : 'Ollama не подключена'} · ${voice}`;
+    const provider = config.llm_provider === 'cloud' ? 'облачная LLM' : config.llm_provider === 'local' ? 'локальная LLM' : 'LLM не настроена';
+    runtimeStatus.textContent = `Whisper ${config.whisper_model} · ${provider} · ${voice}`;
+    if (config.cloud_consent_required) {
+      cloudClipConsent.hidden = false;
+      cloudStoryConsent.hidden = false;
+    }
+    const limits = config.source_limits || {};
+    const minutes = limits.minutes ? `${limits.minutes} мин` : 'без лимита времени';
+    const megabytes = limits.megabytes ? `${limits.megabytes} МБ` : 'без лимита размера';
+    hardwareProfile.innerHTML = `<strong>CPU-профиль:</strong> Whisper ${esc(config.whisper_model)} · ${esc(config.whisper_cpu_threads)} потоков · FFmpeg ${esc(config.ffmpeg_threads)} потоков · источник: ${esc(minutes)}, ${esc(megabytes)}.`;
   } catch { runtimeStatus.textContent = 'Локальный режим'; }
   refresh();
 })();

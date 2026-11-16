@@ -55,6 +55,21 @@ def test_home_and_rejected_jobs(monkeypatch, tmp_path):
         )
         assert missing_disclosure.status_code == 422
 
+        no_llm = client.post(
+            "/api/stories",
+            json={
+                "topic": "Вымышленная история о старой библиотеке и письме",
+                "story_kind": "fictional",
+                "language": "ru",
+                "duration_seconds": 45,
+                "visual_style": "cinematic",
+                "render_height": 720,
+                "cloud_processing_allowed": False,
+                "ai_disclosure_confirmed": True,
+            },
+        )
+        assert no_llm.status_code == 409
+
 
 def test_url_allowlist_and_caption_generation(tmp_path):
     assert validate_source_url("https://youtu.be/abc123") == "https://youtu.be/abc123"

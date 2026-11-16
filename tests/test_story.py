@@ -28,16 +28,16 @@ class FakeResponse:
 
 def test_local_story_script_is_normalised_and_cards_are_created(monkeypatch, tmp_path):
     settings = Settings(
-        data_dir=tmp_path,
-        whisper_model="small",
-        local_llm_url="http://ollama:11434/v1",
-        local_llm_model="qwen2.5:7b",
-        max_workers=1,
-        ytdlp_cookies_file="",
-        piper_voice_model="",
-        piper_speaker="",
+        data_dir=tmp_path, whisper_model="base", whisper_device="cpu", whisper_compute_type="int8",
+        whisper_cpu_threads=6, ffmpeg_threads=6, max_source_minutes=120, max_source_mb=3500,
+        local_llm_url="http://ollama:11434/v1", local_llm_model="qwen2.5:3b", local_llm_api_key="",
+        cloud_llm_url="", cloud_llm_model="", cloud_llm_api_key="", llm_mode="auto",
+        max_workers=1, ytdlp_cookies_file="", piper_voice_model="", piper_speaker="",
     )
-    monkeypatch.setattr("app.story.requests.post", lambda *args, **kwargs: FakeResponse())
+    monkeypatch.setattr(
+        "app.story.chat_completion",
+        lambda *args, **kwargs: FakeResponse().json()["choices"][0]["message"]["content"],
+    )
     job = {
         "topic": "Вымышленная история о старом письме",
         "story_kind": "fictional",
@@ -66,7 +66,13 @@ def test_story_render_assembles_local_assets_without_cloud(monkeypatch, tmp_path
             {"narration": "Теперь он знал, что сделает первый шаг сегодня.", "on_screen_text": "Первый шаг", "visual_prompt": "Абстрактная дорога"},
         ],
     }
-    settings = Settings(tmp_path, "small", "", "qwen2.5:7b", 1, "", "", "")
+    settings = Settings(
+        data_dir=tmp_path, whisper_model="base", whisper_device="cpu", whisper_compute_type="int8",
+        whisper_cpu_threads=6, ffmpeg_threads=6, max_source_minutes=120, max_source_mb=3500,
+        local_llm_url="", local_llm_model="qwen2.5:3b", local_llm_api_key="",
+        cloud_llm_url="", cloud_llm_model="", cloud_llm_api_key="", llm_mode="auto",
+        max_workers=1, ytdlp_cookies_file="", piper_voice_model="", piper_speaker="",
+    )
     commands = []
 
     def fake_speech(text, language, output, _settings, _log):

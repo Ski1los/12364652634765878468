@@ -59,6 +59,7 @@ class JobManager:
             "min_seconds": payload["min_seconds"],
             "max_seconds": payload["max_seconds"],
             "render_height": payload["render_height"],
+            "cloud_processing_allowed": payload.get("cloud_processing_allowed", False),
             "status": "queued",
             "stage": "queued",
             "progress": 0,
@@ -85,6 +86,7 @@ class JobManager:
             "duration_seconds": payload["duration_seconds"],
             "visual_style": payload["visual_style"],
             "render_height": payload["render_height"],
+            "cloud_processing_allowed": payload.get("cloud_processing_allowed", False),
             "status": "queued",
             "stage": "queued",
             "progress": 0,
@@ -129,7 +131,7 @@ class JobManager:
                 self._set_stage(job_id, "transcribing", 35)
             elif "ищу потенциально" in lower or "языковая модель" in lower:
                 self._set_stage(job_id, "selecting", 58)
-            elif "локальная llm пишет" in lower:
+            elif "локальная llm пишет" in lower or "облачная llm пишет" in lower:
                 self._set_stage(job_id, "drafting", 22)
             elif "озвучиваю" in lower:
                 self._set_stage(job_id, "narrating", 52)
