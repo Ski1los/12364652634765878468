@@ -1,0 +1,52 @@
+services:
+  clipper:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DATA_DIR: /data
+      # Ryzen 5 5600 / RX 580-safe defaults: CPU-only Whisper and a single job.
+      WHISPER_MODEL: ${WHISPER_MODEL:-base}
+      WHISPER_DEVICE: ${WHISPER_DEVICE:-cpu}
+      WHISPER_COMPUTE_TYPE: ${WHISPER_COMPUTE_TYPE:-int8}
+      WHISPER_CPU_THREADS: ${WHISPER_CPU_THREADS:-6}
+      FFMPEG_THREADS: ${FFMPEG_THREADS:-6}
+      MAX_SOURCE_MINUTES: ${MAX_SOURCE_MINUTES:-120}
+      MAX_SOURCE_MB: ${MAX_SOURCE_MB:-3500}
+      LOCAL_LLM_URL: ${LOCAL_LLM_URL:-}
+      LOCAL_LLM_MODEL: ${LOCAL_LLM_MODEL:-qwen2.5:3b}
+      LOCAL_LLM_API_KEY: ${LOCAL_LLM_API_KEY:-}
+      # Optional explicit cloud mode: only a user who ticks consent in the UI
+      # sends a Story idea/transcript digest to this OpenAI-compatible endpoint.
+      LLM_MODE: ${LLM_MODE:-auto}
+      CLOUD_LLM_URL: ${CLOUD_LLM_URL:-}
+      CLOUD_LLM_MODEL: ${CLOUD_LLM_MODEL:-}
+      CLOUD_LLM_API_KEY: ${CLOUD_LLM_API_KEY:-}
+      MAX_WORKERS: ${MAX_WORKERS:-1}
+      YTDLP_COOKIES_FILE: ${YTDLP_COOKIES_FILE:-}
+      # Download reliability knobs. Chrome impersonation is on by default and
+      # needs the curl-cffi dependency installed in requirements.txt.
+      YTDLP_IMPERSONATE: ${YTDLP_IMPERSONATE:-chrome}
+      YTDLP_PROXY: ${YTDLP_PROXY:-}
+      YTDLP_FORCE_IPV4: ${YTDLP_FORCE_IPV4:-0}
+      # Optional natural local Piper voice model, mounted from ./data/voices.
+      PIPER_VOICE_MODEL: ${PIPER_VOICE_MODEL:-}
+      PIPER_SPEAKER: ${PIPER_SPEAKER:-}
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+
+  # Optional and entirely local. Start it with:
+  #   docker compose --profile ai up -d
+  # Then fetch a free local model once:
+  #   docker compose exec ollama ollama pull qwen2.5:3b
+  # Set LOCAL_LLM_URL=http://ollama:11434/v1 in .env and restart clipper.
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ai"]
+    volumes:
+      - ollama:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  ollama:

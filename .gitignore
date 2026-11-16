@@ -1,0 +1,8 @@
+# Runtime data: downloads, local Whisper models, transcripts and rendered clips
+/data/
+.env
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.DS_Store

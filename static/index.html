@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Локальное создание коротких видео с субтитрами без платных API." />
+  <title>ClipLab Local — моменты из видео</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#top" aria-label="ClipLab Local">clip<span>lab</span><em>local</em></a>
+    <div class="local-status"><i></i><span>Local-first · без водяного знака</span></div>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div class="eyebrow">СОЗДАВАЙТЕ SHORTS НА СВОЁМ СЕРВЕРЕ</div>
+      <h1>От сырого видео<br />до <strong>истории,<br />которую досмотрят.</strong></h1>
+      <p class="intro">Нарезайте свои стримы и интервью или соберите оригинальный Story Reel: сценарий, локальная озвучка, вертикальное видео, субтитры и готовый текст для публикации — всё хранится у вас.</p>
+      <div class="promise-list" aria-label="Преимущества">
+        <span><b>01</b> Без платных API</span>
+        <span><b>02</b> Аудио и файлы у вас</span>
+        <span><b>03</b> MP4 + SRT + контент-пак</span>
+      </div>
+    </section>
+
+    <nav class="tool-tabs" aria-label="Инструменты">
+      <button class="tool-tab is-active" type="button" data-panel="clip-studio"><span>✂</span> Нарезка видео</button>
+      <button class="tool-tab" type="button" data-panel="story-studio"><span>✦</span> Story Studio <small>LOCAL AI</small></button>
+      <button class="tool-tab" type="button" data-panel="plan-studio"><span>▦</span> Creator Plan <small>7 / 14 ДНЕЙ</small></button>
+    </nav>
+
+    <section id="clip-studio" class="tool-panel workspace" aria-label="Нарезать видео">
+      <form id="job-form" class="card form-card">
+        <div class="card-kicker">НОВАЯ ОБРАБОТКА</div>
+        <label class="url-label" for="source-url">Ссылка на видео</label>
+        <div class="url-row">
+          <span class="link-mark">↗</span>
+          <input id="source-url" name="source_url" type="url" required maxlength="2000" autocomplete="url" placeholder="https://www.youtube.com/watch?v=…" />
+        </div>
+        <p class="hint">Поддерживаются YouTube и Twitch VOD/клипы. Прямые эфиры и защищённые/приватные видео не поддерживаются.</p>
+
+        <div class="form-grid">
+          <label>Сколько клипов
+            <select id="clip-count" name="clip_count">
+              <option value="2">2 клипа</option>
+              <option value="3" selected>3 клипа</option>
+              <option value="4">4 клипа</option>
+              <option value="5">5 клипов</option>
+              <option value="6">6 клипов</option>
+            </select>
+          </label>
+          <label>Качество
+            <select id="render-height" name="render_height">
+              <option value="720" selected>720 × 1280 · быстрее</option>
+              <option value="1080">1080 × 1920 · лучше</option>
+            </select>
+          </label>
+        </div>
+        <fieldset class="duration-fieldset">
+          <legend>Длительность одного клипа</legend>
+          <div class="duration-inputs">
+            <label><input id="min-seconds" type="number" min="10" max="90" value="20" required /><small>от, сек</small></label>
+            <span>—</span>
+            <label><input id="max-seconds" type="number" min="15" max="150" value="50" required /><small>до, сек</small></label>
+          </div>
+        </fieldset>
+        <label class="consent"><input id="rights" type="checkbox" required /><span>У меня есть права или разрешение на обработку этого видео.</span></label>
+        <label id="cloud-clip-consent" class="consent cloud-consent" hidden><input id="cloud-clip-allowed" type="checkbox" /><span>Разрешаю отправить только краткий текстовый digest таймкодов в выбранный облачный LLM для более точного выбора. Видео и аудио остаются на этом сервере.</span></label>
+        <div id="form-error" class="form-error" role="alert" hidden></div>
+        <button id="submit-button" class="submit" type="submit"><span>Найти моменты</span><b>→</b></button>
+        <p class="under-button">Обработка идёт в браузерной очереди этого сервера. Не закрывайте сервер, страницу можно закрыть.</p>
+      </form>
+
+      <aside class="card intelligence-card">
+        <div class="card-kicker">КАК ВЫБИРАЕМ</div>
+        <div class="radar" aria-hidden="true"><div></div><div></div><div></div><span></span></div>
+        <h2>Не случайные нарезки.</h2>
+        <p>Локальный анализ ищет смех, удивление, эмоциональные реакции, выразительную речь и цельные фразы.</p>
+        <ol>
+          <li><span>01</span> Скачивание и проверка источника</li>
+          <li><span>02</span> Локальная расшифровка Whisper</li>
+          <li><span>03</span> Ранжирование реакций и сцен</li>
+          <li><span>04</span> Вертикальный MP4 с субтитрами</li>
+        </ol>
+        <p id="hardware-profile" class="optional-ai"><strong>Производительность:</strong> CPU-профиль подбирается автоматически. Локальная или явно разрешённая облачная LLM может учитывать смысл диалога.</p>
+      </aside>
+    </section>
+
+    <section id="story-studio" class="tool-panel story-studio" hidden aria-label="Создать оригинальную историю">
+      <form id="story-form" class="card story-form">
+        <div class="studio-head"><div><div class="card-kicker">STORY STUDIO</div><h2>Ролик из одной идеи</h2></div><span class="local-badge">LOCAL AI</span></div>
+        <p class="story-lead">Создаёт оригинальный сценарий, голосовую дорожку, анимированный вертикальный Story Reel, субтитры и текст для публикации. Без LLM используется прозрачный локальный шаблон — тема не уходит в сеть; подключите локальную LLM для более вариативного текста.</p>
+        <label for="story-topic">О чём рассказать?</label>
+        <textarea id="story-topic" required minlength="10" maxlength="900" placeholder="Например: вымышленная история о человеке, который нашёл странное письмо в старой книге"></textarea>
+        <div class="idea-chips" aria-label="Примеры тем">
+          <button type="button" data-idea="Вымышленная история о записке, которую герой нашёл в старой библиотечной книге">Неожиданная находка</button>
+          <button type="button" data-idea="Короткая вымышленная история о добром поступке, который вернулся спустя годы">Тёплая история</button>
+          <button type="button" data-idea="Загадочная, но безопасная вымышленная история о лифте, который останавливался на несуществующем этаже">Лёгкая загадка</button>
+        </div>
+        <div class="story-grid">
+          <label>Формат
+            <select id="story-kind"><option value="fictional">Вымышленная история</option><option value="inspiration">Вдохновляющий сюжет</option><option value="curiosity">Безопасная загадка</option></select>
+          </label>
+          <label>Язык
+            <select id="story-language"><option value="ru">Русский</option><option value="en">English</option></select>
+          </label>
+          <label>Длина
+            <select id="story-duration"><option value="30">≈ 30 секунд</option><option value="45" selected>≈ 45 секунд</option><option value="60">≈ 60 секунд</option><option value="90">≈ 90 секунд</option></select>
+          </label>
+          <label>Визуальный тон
+            <select id="story-style"><option value="cinematic">Кинематографичный</option><option value="comic">Ироничный</option><option value="minimal">Минимализм</option></select>
+          </label>
+          <label>Качество
+            <select id="story-height"><option value="720" selected>720 × 1280</option><option value="1080">1080 × 1920</option></select>
+          </label>
+        </div>
+        <div class="voice-note"><span>♬</span><p><strong>Озвучка без облака.</strong> По умолчанию используется локальный eSpeak NG. Добавьте Piper-модель в <code>data/voices</code> — и ролики будут озвучиваться более естественным локальным голосом.</p></div>
+        <label class="consent story-consent"><input id="ai-disclosure" type="checkbox" required /><span>Я размещу понятную маркировку об автоматической/ИИ-помощи, проверю текст и не буду выдавать вымышленную историю за реальный факт.</span></label>
+        <label id="cloud-story-consent" class="consent cloud-consent" hidden><input id="cloud-story-allowed" type="checkbox" /><span>Разрешаю отправить тему и инструкцию в выбранный облачный LLM для создания сценария. Видео, голос и итоговый ролик останутся локально.</span></label>
+        <div id="story-error" class="form-error" role="alert" hidden></div>
+        <button id="story-submit" class="submit story-submit" type="submit"><span>Собрать Story Reel</span><b>✦</b></button>
+      </form>
+      <aside class="card story-preview">
+        <div class="card-kicker">ЧТО ВЫ ПОЛУЧИТЕ</div>
+        <div class="phone-frame" aria-hidden="true"><div class="phone-notch"></div><div class="phone-screen"><span>STORY REEL</span><strong>Ваша идея<br />становится<br />историей.</strong><i></i><small>СЦЕНАРИЙ · ГОЛОС · СУБТИТРЫ</small></div></div>
+        <div class="output-list"><div><b>01</b><span>Оригинальный сценарий из 5–8 сцен</span></div><div><b>02</b><span>WAV-озвучка и готовый MP4</span></div><div><b>03</b><span>SRT, заголовок, описание и хэштеги</span></div></div>
+        <p class="honest-note">Автогенерация не гарантирует просмотры или доход. Перед публикацией проверьте факты, качество и правила платформы.</p>
+      </aside>
+    </section>
+
+    <section id="plan-studio" class="tool-panel plan-studio" hidden aria-label="Создать контент-план">
+      <form id="plan-form" class="card plan-form">
+        <div class="studio-head"><div><div class="card-kicker">CREATOR PLAN</div><h2>Снимайте с идеей,<br />а не наугад.</h2></div><span class="local-badge">EDITORIAL</span></div>
+        <p class="story-lead">План не обещает доход или просмотры. Он помогает собрать честную стратегию, календарь оригинальных роликов и понятный чек-лист публикации под вашу нишу.</p>
+        <div class="plan-field-grid">
+          <label>Ниша или тема канала<textarea id="plan-niche" required minlength="3" maxlength="180" placeholder="Например: короткие вымышленные истории о неожиданных поступках"></textarea></label>
+          <label>Для кого контент<textarea id="plan-audience" required minlength="3" maxlength="180" placeholder="Например: зрители 18–30, которым нравятся спокойные истории перед сном"></textarea></label>
+        </div>
+        <div class="story-grid plan-controls">
+          <label>Фокус
+            <select id="plan-focus"><option value="stories">Оригинальные истории</option><option value="education">Лёгкое объяснение</option><option value="commentary">Развлекательный комментарий</option></select>
+          </label>
+          <label>Период
+            <select id="plan-days"><option value="7">7 дней</option><option value="14">14 дней</option></select>
+          </label>
+          <label>Язык
+            <select id="plan-language"><option value="ru">Русский</option><option value="en">English</option></select>
+          </label>
+        </div>
+        <fieldset class="platforms-fieldset"><legend>Где планируете публиковать</legend><div class="platform-pills"><label><input type="checkbox" name="plan-platform" value="youtube_shorts" checked /><span>YouTube Shorts</span></label><label><input type="checkbox" name="plan-platform" value="tiktok" checked /><span>TikTok</span></label><label><input type="checkbox" name="plan-platform" value="instagram_reels" checked /><span>Instagram Reels</span></label></div></fieldset>
+        <label id="cloud-plan-consent" class="consent cloud-consent" hidden><input id="cloud-plan-allowed" type="checkbox" /><span>Разрешаю отправить нишу, аудиторию и инструкцию в выбранный облачный LLM для создания контент-плана.</span></label>
+        <div id="plan-error" class="form-error" role="alert" hidden></div>
+        <button id="plan-submit" class="submit" type="submit"><span>Собрать план на неделю</span><b>→</b></button>
+      </form>
+      <aside class="card plan-preview"><div class="card-kicker">В ПЛАНЕ БУДЕТ</div><div class="calendar-mock"><div><b>01</b><span>Название и честный хук</span></div><div><b>02</b><span>Формат: Story Reel или Clip Finder</span></div><div><b>03</b><span>CTA и заметка для съёмки</span></div><div><b>04</b><span>Метрики и чек-лист проверки</span></div></div><p class="honest-note">Используйте план как редакторский черновик: выбирайте идеи, которые вы реально можете сделать качественно, а не публикуйте всё без проверки.</p></aside>
+    </section>
+
+    <section class="jobs-section" aria-live="polite">
+      <div class="section-heading">
+        <div><span class="eyebrow">ЛОКАЛЬНЫЕ ЗАДАЧИ</span><h2>Результаты</h2></div>
+        <button class="refresh" id="refresh" type="button">Обновить <span>↻</span></button>
+      </div>
+      <div id="empty-state" class="empty-state">
+        <span class="empty-mark">✦</span>
+        <h3>Здесь появятся ваши ролики</h3>
+        <p>Нарезайте своё видео или создайте Story Reel. Готовые MP4, субтитры и тексты останутся на этом сервере, пока вы их не удалите.</p>
+      </div>
+      <div id="jobs" class="jobs"></div>
+    </section>
+  </main>
+
+  <footer><span>CLIPLAB LOCAL</span><span>Сделано для самостоятельного хостинга</span><span id="runtime-status">Проверяю локальную конфигурацию…</span></footer>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
