@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -92,3 +93,41 @@ def test_url_allowlist_and_caption_generation(tmp_path):
     write_captions(words, 0, 720, 1280, srt, ass)
     assert "Это было так" in srt.read_text(encoding="utf-8")
     assert "[Events]" in ass.read_text(encoding="utf-8")
+
+
+def test_story_request_enters_queue_and_completes_with_a_local_llm(monkeypatch, tmp_path):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "runtime"))
+    monkeypatch.setenv("LOCAL_LLM_URL", "http://local-ollama.test/v1")
+    monkeypatch.setenv("LOCAL_LLM_MODEL", "qwen2.5:3b")
+    monkeypatch.setattr(
+        "app.jobs.run_story_pipeline",
+        lambda *_: {
+            "title": "Тест", "hook": "Хук", "description": "AI-assisted.", "hashtags": [],
+            "disclosure": "Создано с помощью ИИ.", "scenes": [], "video": "story.mp4",
+            "subtitles": "story.srt", "audio": "narration.wav", "content_pack": "content-pack.txt",
+            "duration": 30, "voice_engine": "test",
+        },
+    )
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/stories",
+            json={
+                "topic": "Вымышленная история о старом письме и библиотеке",
+                "story_kind": "fictional",
+                "language": "ru",
+                "duration_seconds": 30,
+                "visual_style": "cinematic",
+                "render_height": 720,
+                "cloud_processing_allowed": False,
+                "ai_disclosure_confirmed": True,
+            },
+        )
+        assert response.status_code == 202, response.text
+        job_id = response.json()["id"]
+        for _ in range(30):
+            job = client.get(f"/api/jobs/{job_id}").json()
+            if job["status"] == "completed":
+                break
+            time.sleep(.02)
+        assert job["status"] == "completed"
+        assert job["story"]["video"] == "story.mp4"

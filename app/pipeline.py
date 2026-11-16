@@ -425,6 +425,7 @@ def render_clip(
     settings: Settings,
     log: Log,
 ) -> dict:
+    output_dir.mkdir(parents=True, exist_ok=True)
     width = int(round(height * 9 / 16 / 2) * 2)
     clip_name = f"clip-{clip_number:02}"
     mp4_file = output_dir / f"{clip_name}.mp4"
