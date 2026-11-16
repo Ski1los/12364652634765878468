@@ -40,6 +40,9 @@ class Settings:
     llm_mode: str
     max_workers: int
     ytdlp_cookies_file: str
+    ytdlp_proxy: str
+    ytdlp_impersonate: str
+    ytdlp_force_ipv4: bool
     piper_voice_model: str
     piper_speaker: str
 
@@ -83,6 +86,10 @@ def _nonnegative_int(name: str, default: int, *, maximum: int = 1_000_000) -> in
         return default
 
 
+def _boolean(name: str, default: bool = False) -> bool:
+    return os.getenv(name, "1" if default else "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _endpoint(value: str, *, cloud: bool = False) -> str:
     url = value.strip().rstrip("/")
     if not url:
@@ -118,6 +125,10 @@ def load_settings() -> Settings:
         llm_mode=llm_mode,
         max_workers=_positive_int("MAX_WORKERS", 1, maximum=8),
         ytdlp_cookies_file=os.getenv("YTDLP_COOKIES_FILE", "").strip(),
+        # `chrome` uses curl-cffi and avoids several YouTube TLS/player quirks.
+        ytdlp_proxy=os.getenv("YTDLP_PROXY", "").strip(),
+        ytdlp_impersonate=os.getenv("YTDLP_IMPERSONATE", "chrome").strip(),
+        ytdlp_force_ipv4=_boolean("YTDLP_FORCE_IPV4"),
         # Piper itself is packaged in requirements; a voice model is deliberately
         # supplied by the self-hoster so no hidden cloud TTS is ever used.
         piper_voice_model=os.getenv("PIPER_VOICE_MODEL", "").strip(),

@@ -56,6 +56,13 @@ def test_home_and_rejected_jobs(monkeypatch, tmp_path):
         )
         assert missing_disclosure.status_code == 422
 
+        monkeypatch.setattr(
+            "app.jobs.run_story_pipeline",
+            lambda *_: {"title": "Шаблон", "hook": "Хук", "description": "Локальный черновик.", "hashtags": [],
+                        "disclosure": "Шаблон.", "scenes": [], "video": "story.mp4", "subtitles": "story.srt",
+                        "audio": "narration.wav", "content_pack": "content-pack.txt", "duration": 30,
+                        "voice_engine": "test", "script_engine": "Локальный сценарный шаблон (без LLM)"},
+        )
         no_llm = client.post(
             "/api/stories",
             json={
@@ -69,7 +76,11 @@ def test_home_and_rejected_jobs(monkeypatch, tmp_path):
                 "ai_disclosure_confirmed": True,
             },
         )
-        assert no_llm.status_code == 409
+        assert no_llm.status_code == 202
+        config = client.get("/api/config").json()
+        assert config["story_ready"] is True
+        assert config["story_engine"] == "local_template"
+        assert config["plan_ready"] is False
 
 
 def test_url_allowlist_and_caption_generation(tmp_path):

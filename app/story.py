@@ -17,7 +17,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 from .errors import PipelineError
 from .llm import chat_completion
-from .pipeline import Word, probe_duration, run_command, write_captions
+from .pipeline import Word, ffmpeg_executable, probe_duration, run_command, write_captions
 from .settings import Settings
 from .storage import write_json
 
@@ -87,13 +87,73 @@ def _story_prompt(job: dict[str, Any]) -> str:
 Нужно 5–8 сцен, суммарно примерно нужной длительности."""
 
 
+def _local_template_script(job: dict[str, Any], log: Log) -> dict[str, Any]:
+    """Build a transparent, offline draft when no LLM is configured.
+
+    This is an editorial template rather than a hidden AI model: it keeps the
+    feature operational on a clean modest PC and never transmits the topic.
+    """
+    topic = _as_text(job.get("topic"), 180, "a small change")
+    is_russian = job.get("language") == "ru"
+    duration = int(job.get("duration_seconds", 45))
+    target_words = int(duration * (1.8 if is_russian else 2.0))
+    if is_russian:
+        kind = {"fictional": "вымышленная история", "inspiration": "вымышленная вдохновляющая история", "curiosity": "вымышленная лёгкая загадка"}.get(job.get("story_kind"), "вымышленная история")
+        scenes = [
+            {"narration": f"Однажды вечером герой подумал о теме «{topic}» и заметил маленькую деталь, которую раньше пропускал.", "on_screen_text": "Одна деталь", "visual_prompt": "Тихая абстрактная комната и луч света"},
+            {"narration": "Он не стал искать готовый ответ. Вместо этого он остановился, сделал паузу и задал себе один честный вопрос.", "on_screen_text": "Пауза", "visual_prompt": "Минималистичная карточка с мягкими формами"},
+            {"narration": "Ответ оказался не громким и не идеальным. Но он подсказал следующий спокойный шаг, который можно сделать уже сегодня.", "on_screen_text": "Следующий шаг", "visual_prompt": "Абстрактная дорога к тёплому горизонту"},
+            {"narration": "Герой записал эту мысль, чтобы не потерять её в привычной спешке. И от этого история неожиданно стала яснее.", "on_screen_text": "Записать мысль", "visual_prompt": "Лист бумаги, свет и графические тени"},
+            {"narration": "Эта короткая история вымышленная, но вопрос остаётся настоящим: какую маленькую деталь вы заметили бы в своей теме?", "on_screen_text": "А что заметили бы вы?", "visual_prompt": "Спокойная финальная карточка с мягким светом"},
+            {"narration": "Иногда перемена начинается не с громкого решения, а с внимательного взгляда на то, что уже рядом.", "on_screen_text": "Внимательный взгляд", "visual_prompt": "Абстрактные круги и тонкая линия"},
+            {"narration": "Герой улыбнулся и оставил себе время подумать. Никаких обещаний, только следующий аккуратный шаг.", "on_screen_text": "Без спешки", "visual_prompt": "Тёмный фон, акцентная линия и тёплое свечение"},
+            {"narration": "Если эта вымышленная зарисовка отозвалась, сохраните идею для себя и поделитесь своей версией в комментарии.", "on_screen_text": "Ваша версия", "visual_prompt": "Чистая карточка для мягкого диалога"},
+        ]
+        title = _as_text(f"{topic}: маленький поворот", 70, "Маленький поворот")
+        description = f"Оригинальная {kind} на тему «{topic}». Сценарий собран локально по прозрачному шаблону; проверьте его перед публикацией."
+        tags = ["#оригинальнаяистория", "#shorts", "#локальныйконтент"]
+        disclosure = "Оригинальная вымышленная история. Сценарий собран локально по шаблону; проверьте материал перед публикацией."
+        filler = "Это не совет и не обещание результата. Просто спокойная пауза, чтобы выбрать свой следующий шаг."
+        titles = [title, "Одна деталь меняет ход истории", "Маленький шаг без громких обещаний"]
+    else:
+        kind = {"fictional": "fictional story", "inspiration": "fictional reflective story", "curiosity": "fictional light mystery"}.get(job.get("story_kind"), "fictional story")
+        scenes = [
+            {"narration": f"One evening, the main character thought about {topic} and noticed a small detail that had always been there.", "on_screen_text": "One small detail", "visual_prompt": "Quiet abstract room with a beam of light"},
+            {"narration": "Instead of chasing a perfect answer, they paused, took a breath, and wrote down one honest question.", "on_screen_text": "Take a pause", "visual_prompt": "Minimal graphic card with calm shapes"},
+            {"narration": "The answer was not dramatic. It simply pointed to one thoughtful next step that could happen today.", "on_screen_text": "One next step", "visual_prompt": "Abstract path toward a warm horizon"},
+            {"narration": "They kept that thought on paper, so the rush of an ordinary day would not erase it.", "on_screen_text": "Keep the thought", "visual_prompt": "Paper, light, and editorial shadows"},
+            {"narration": "This short story is fictional, but the question is real: what small detail would you notice in your own life?", "on_screen_text": "What would you notice?", "visual_prompt": "Calm ending card with a soft glow"},
+            {"narration": "Sometimes change begins without a grand announcement. It starts with looking carefully at what is already near.", "on_screen_text": "Look carefully", "visual_prompt": "Abstract circles connected by a fine line"},
+            {"narration": "The character smiled and gave the idea more time. No promises, just one careful next step.", "on_screen_text": "No rush", "visual_prompt": "Dark background with a warm accent line"},
+            {"narration": "If this fictional sketch stayed with you, save the idea and share your own version in the comments.", "on_screen_text": "Your version", "visual_prompt": "Clean closing card inviting a gentle conversation"},
+        ]
+        title = _as_text(f"{topic}: a small turn", 70, "A small turn")
+        description = f"An original {kind} about {topic}. The script was assembled locally with a transparent template; review it before publishing."
+        tags = ["#originalstory", "#shorts", "#localcreator"]
+        disclosure = "Original fictional story. The script was assembled locally from a template; review it before publishing."
+        filler = "This is not advice or a promise of results. It is simply a calm pause before choosing a next step."
+        titles = [title, "One small detail changes the story", "A quiet next step"]
+
+    scene_count = 5 if duration <= 45 else 6 if duration <= 60 else 8
+    scenes = scenes[:scene_count]
+    filler_index = 0
+    while sum(len(scene["narration"].split()) for scene in scenes) < target_words:
+        scenes[filler_index % len(scenes)]["narration"] += " " + filler
+        filler_index += 1
+    log("Локальный сценарный конструктор собрал оригинальный черновик без LLM и без передачи темы в сеть.")
+    captions = {platform: description for platform in ("youtube_shorts", "tiktok", "instagram_reels")}
+    return {
+        "title": title, "titles": titles, "hook": scenes[0]["narration"][:110],
+        "description": description, "platform_captions": captions, "hashtags": tags,
+        "disclosure": disclosure, "scenes": scenes,
+        "script_engine": "Локальный сценарный шаблон (без LLM)",
+    }
+
+
 def generate_script(job: dict[str, Any], settings: Settings, log: Log) -> dict[str, Any]:
     target = settings.active_llm
     if not target:
-        raise PipelineError(
-            "Story Studio требует локальную или явно настроенную облачную LLM. Для локального режима "
-            "включите Ollama: LOCAL_LLM_URL=http://ollama:11434/v1 и скачайте qwen2.5:3b."
-        )
+        return _local_template_script(job, log)
     if target.is_cloud and not job.get("cloud_processing_allowed"):
         raise PipelineError(
             "Для облачного сценария нужно отдельное разрешение: тема и инструкция будут отправлены "
@@ -166,6 +226,7 @@ def generate_script(job: dict[str, Any], settings: Settings, log: Log) -> dict[s
         "hashtags": clean_tags[:8],
         "disclosure": _as_text(data.get("disclosure"), 160, "Создано с помощью ИИ; история вымышленная."),
         "scenes": scenes,
+        "script_engine": f"{location} LLM",
     }
 
 
@@ -287,11 +348,24 @@ def synthesize_narration(text: str, language: str, output_file: Path, settings: 
         engine = "Piper (локальная модель)"
     else:
         # Included by the Docker image. It is a zero-setup offline fallback, not a cloud request.
-        voice = "ru" if language == "ru" else "en-us"
-        command = ["espeak-ng", "-v", voice, "-s", "155", "-w", str(output_file), "-f", str(text_file)]
-        log("Озвучиваю через локальный eSpeak NG (для более естественного голоса подключите Piper)…")
-        run_command(command, log)
-        engine = "eSpeak NG (локальный fallback)"
+        espeak = shutil.which("espeak-ng") or shutil.which("espeak")
+        if espeak:
+            voice = "ru" if language == "ru" else "en-us"
+            command = [espeak, "-v", voice, "-s", "155", "-w", str(output_file), "-f", str(text_file)]
+            log("Озвучиваю через локальный eSpeak NG (для более естественного голоса подключите Piper)…")
+            run_command(command, log)
+            engine = "eSpeak NG (локальный fallback)"
+        else:
+            # A bare pip installation may not ship a system TTS executable. Keep
+            # the Story Reel usable as a subtitle-led video and disclose silence
+            # honestly; Docker always includes eSpeak NG.
+            seconds = max(2.0, len(text.split()) / 2.0)
+            log("Piper/eSpeak не найдены: создаю тихую дорожку. Для речи используйте Docker или подключите Piper.")
+            run_command([
+                ffmpeg_executable(), "-y", "-f", "lavfi", "-i", "anullsrc=r=22050:cl=mono",
+                "-t", f"{seconds:.2f}", "-c:a", "pcm_s16le", str(output_file),
+            ], log)
+            engine = "Тихая дорожка — eSpeak/Piper не найден"
     if not output_file.is_file() or output_file.stat().st_size < 300:
         raise PipelineError("Локальный синтез речи не создал аудиофайл.")
     return engine
@@ -339,9 +413,11 @@ def render_story(story: dict[str, Any], job: dict[str, Any], settings: Settings,
     silent_video = output_dir / "visuals.mp4"
     log("Собираю вертикальные сторис-карточки…")
     run_command([
-        "ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat),
-        # Subtle Ken Burns movement keeps original local story cards from feeling like a slideshow.
-        "-vf", f"zoompan=z='min(max(zoom,pzoom)+0.0006,1.075)':d=1:s={width}x{height}:fps=30,format=yuv420p",
+        ffmpeg_executable(), "-y", "-f", "concat", "-safe", "0", "-i", str(concat),
+        # The concat manifest owns every scene duration. A zoompan `d=1` here
+        # would collapse a 45-second story into one frame per card, so retain
+        # source timing and render it at a stable mobile-friendly frame rate.
+        "-vf", "fps=30,format=yuv420p",
         "-threads", str(settings.ffmpeg_threads), "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", str(silent_video),
     ], log)
     srt_file = output_dir / "story.srt"
@@ -351,7 +427,7 @@ def render_story(story: dict[str, Any], job: dict[str, Any], settings: Settings,
     subtitle = str(ass_file).replace("\\", "\\\\").replace(":", "\\:").replace("'", r"\'")
     log("Вшиваю субтитры и аудиодорожку в итоговый ролик…")
     run_command([
-        "ffmpeg", "-y", "-i", str(silent_video), "-i", str(voice_file),
+        ffmpeg_executable(), "-y", "-i", str(silent_video), "-i", str(voice_file),
         "-vf", f"subtitles=filename='{subtitle}'", "-map", "0:v", "-map", "1:a", "-shortest",
         "-threads", str(settings.ffmpeg_threads), "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac", "-b:a", "160k",
         "-movflags", "+faststart", str(output_video),

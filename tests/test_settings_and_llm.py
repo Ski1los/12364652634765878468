@@ -1,7 +1,7 @@
 import pytest
 
 from app.llm import chat_completion
-from app.pipeline import download_source
+from app.pipeline import PipelineError, downloader_network_error, download_source
 from app.settings import LLMTarget, Settings, load_settings
 
 
@@ -62,7 +62,7 @@ def test_download_source_has_size_and_duration_guardrails(monkeypatch, tmp_path)
         whisper_cpu_threads=6, ffmpeg_threads=6, max_source_minutes=90, max_source_mb=2500,
         local_llm_url="", local_llm_model="qwen2.5:3b", local_llm_api_key="",
         cloud_llm_url="", cloud_llm_model="", cloud_llm_api_key="", llm_mode="auto",
-        max_workers=1, ytdlp_cookies_file="", piper_voice_model="", piper_speaker="",
+        max_workers=1, ytdlp_cookies_file="", ytdlp_proxy="", ytdlp_impersonate="chrome", ytdlp_force_ipv4=False, piper_voice_model="", piper_speaker="",
     )
     captured = []
 
@@ -75,3 +75,10 @@ def test_download_source_has_size_and_duration_guardrails(monkeypatch, tmp_path)
     assert result.name == "source.mp4"
     assert "duration <= 5400" in captured
     assert "2500M" in captured
+    assert "--impersonate" in captured and "chrome" in captured
+
+
+def test_tls_downloader_error_has_an_actionable_message():
+    assert "HTTPS-соединение" in downloader_network_error("TLS/SSL connection has been closed (EOF)")
+    assert "HTTPS-соединение" in downloader_network_error("curl: (35) BoringSSL SSL_connect: Connection closed abruptly")
+    assert downloader_network_error("video unavailable") is None

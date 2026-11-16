@@ -1,6 +1,7 @@
 """In-process background queue and durable job state for a single local instance."""
 from __future__ import annotations
 
+import shutil
 import threading
 import traceback
 import uuid
@@ -130,6 +131,33 @@ class JobManager:
             self._save(job)
         self._executor.submit(self._work, job_id)
         return self.public_job(job)
+
+    def retry(self, job_id: str) -> dict[str, Any] | None:
+        """Requeue a failed task after changing downloader/LLM configuration."""
+        with self._lock:
+            job = self._jobs.get(job_id)
+            if not job or job.get("status") != "failed":
+                return None
+            job_dir = self.settings.jobs_dir / job_id
+            # Keep the durable job id and parameters, discard partial media/output only.
+            for name in ("source", "output"):
+                shutil.rmtree(job_dir / name, ignore_errors=True)
+            for name in ("transcript.txt", "transcript.json", "story-script.json", "creator-plan.json"):
+                (job_dir / name).unlink(missing_ok=True)
+            job.update({"status": "queued", "stage": "queued", "progress": 0, "error": None})
+            if job.get("kind") == "clip":
+                job["clips"] = []
+            elif job.get("kind") == "story":
+                job["story"] = None
+            elif job.get("kind") == "plan":
+                job["plan"] = None
+            job.setdefault("logs", []).append({"at": now(), "message": "Задача перезапущена после изменения конфигурации."})
+            job["logs"] = job["logs"][-120:]
+            job["updated_at"] = now()
+            self._save(job)
+            snapshot = self.public_job(job)
+        self._executor.submit(self._work, job_id)
+        return snapshot
 
     def _update(self, job_id: str, **changes: Any) -> None:
         with self._lock:

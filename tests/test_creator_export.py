@@ -1,3 +1,4 @@
+import time
 import zipfile
 
 from app.jobs import JobManager
@@ -10,7 +11,7 @@ def _settings(tmp_path):
         whisper_cpu_threads=2, ffmpeg_threads=2, max_source_minutes=10, max_source_mb=10,
         local_llm_url="", local_llm_model="qwen2.5:3b", local_llm_api_key="",
         cloud_llm_url="", cloud_llm_model="", cloud_llm_api_key="", llm_mode="auto",
-        max_workers=1, ytdlp_cookies_file="", piper_voice_model="", piper_speaker="",
+        max_workers=1, ytdlp_cookies_file="", ytdlp_proxy="", ytdlp_impersonate="chrome", ytdlp_force_ipv4=False, piper_voice_model="", piper_speaker="",
     )
 
 
@@ -31,3 +32,26 @@ def test_completed_job_can_be_exported_as_a_creator_kit(tmp_path):
     assert archive and archive.is_file()
     with zipfile.ZipFile(archive) as bundle:
         assert set(bundle.namelist()) == {"story-reel.mp4", "story.srt", "content-pack.txt", "cover.png"}
+
+
+def test_failed_job_can_be_retried_without_losing_its_id(monkeypatch, tmp_path):
+    settings = _settings(tmp_path)
+    settings.jobs_dir.mkdir(parents=True, exist_ok=True)
+    manager = JobManager(settings)
+    job_id = "retry-job"
+    manager._jobs[job_id] = {
+        "id": job_id, "kind": "plan", "status": "failed", "stage": "failed", "progress": 100,
+        "error": "network", "logs": [], "plan": None, "created_at": "now", "updated_at": "now",
+        "niche": "stories", "audience": "viewers", "content_focus": "stories", "platforms": ["tiktok"],
+        "plan_days": 7, "language": "ru", "cloud_processing_allowed": False,
+    }
+    monkeypatch.setattr("app.jobs.run_plan_pipeline", lambda *_: {"file": "creator-plan.md"})
+    queued = manager.retry(job_id)
+    assert queued and queued["id"] == job_id and queued["status"] == "queued"
+    for _ in range(30):
+        job = manager.get(job_id)
+        if job and job["status"] == "completed":
+            break
+        time.sleep(.02)
+    assert job and job["status"] == "completed"
+    assert job["plan"]["file"] == "creator-plan.md"

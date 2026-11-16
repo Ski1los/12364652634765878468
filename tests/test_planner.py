@@ -8,7 +8,7 @@ def _settings(tmp_path):
         whisper_cpu_threads=6, ffmpeg_threads=6, max_source_minutes=120, max_source_mb=3500,
         local_llm_url="http://ollama:11434/v1", local_llm_model="qwen2.5:3b", local_llm_api_key="",
         cloud_llm_url="", cloud_llm_model="", cloud_llm_api_key="", llm_mode="auto",
-        max_workers=1, ytdlp_cookies_file="", piper_voice_model="", piper_speaker="",
+        max_workers=1, ytdlp_cookies_file="", ytdlp_proxy="", ytdlp_impersonate="chrome", ytdlp_force_ipv4=False, piper_voice_model="", piper_speaker="",
     )
 
 

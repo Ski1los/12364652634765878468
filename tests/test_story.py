@@ -32,7 +32,7 @@ def test_local_story_script_is_normalised_and_cards_are_created(monkeypatch, tmp
         whisper_cpu_threads=6, ffmpeg_threads=6, max_source_minutes=120, max_source_mb=3500,
         local_llm_url="http://ollama:11434/v1", local_llm_model="qwen2.5:3b", local_llm_api_key="",
         cloud_llm_url="", cloud_llm_model="", cloud_llm_api_key="", llm_mode="auto",
-        max_workers=1, ytdlp_cookies_file="", piper_voice_model="", piper_speaker="",
+        max_workers=1, ytdlp_cookies_file="", ytdlp_proxy="", ytdlp_impersonate="chrome", ytdlp_force_ipv4=False, piper_voice_model="", piper_speaker="",
     )
     monkeypatch.setattr(
         "app.story.chat_completion",
@@ -55,6 +55,24 @@ def test_local_story_script_is_normalised_and_cards_are_created(monkeypatch, tmp
     assert "DISCLOSURE" in pack.read_text(encoding="utf-8")
 
 
+def test_story_uses_a_transparent_local_template_when_llm_is_missing(tmp_path):
+    settings = Settings(
+        data_dir=tmp_path, whisper_model="base", whisper_device="cpu", whisper_compute_type="int8",
+        whisper_cpu_threads=6, ffmpeg_threads=6, max_source_minutes=120, max_source_mb=3500,
+        local_llm_url="", local_llm_model="qwen2.5:3b", local_llm_api_key="",
+        cloud_llm_url="", cloud_llm_model="", cloud_llm_api_key="", llm_mode="auto",
+        max_workers=1, ytdlp_cookies_file="", ytdlp_proxy="", ytdlp_impersonate="chrome", ytdlp_force_ipv4=False, piper_voice_model="", piper_speaker="",
+    )
+    story = generate_script({
+        "topic": "Вымышленная история о письме в старой книге", "story_kind": "fictional",
+        "language": "ru", "duration_seconds": 45, "visual_style": "cinematic",
+    }, settings, lambda _: None)
+    assert story["script_engine"] == "Локальный сценарный шаблон (без LLM)"
+    assert len(story["scenes"]) == 5
+    assert story["platform_captions"]["tiktok"] == story["description"]
+    assert "LLM" not in story["disclosure"]
+
+
 def test_story_render_assembles_local_assets_without_cloud(monkeypatch, tmp_path):
     story = {
         "title": "Тестовая история", "hook": "Письмо ждало героя.", "description": "AI-assisted.",
@@ -71,7 +89,7 @@ def test_story_render_assembles_local_assets_without_cloud(monkeypatch, tmp_path
         whisper_cpu_threads=6, ffmpeg_threads=6, max_source_minutes=120, max_source_mb=3500,
         local_llm_url="", local_llm_model="qwen2.5:3b", local_llm_api_key="",
         cloud_llm_url="", cloud_llm_model="", cloud_llm_api_key="", llm_mode="auto",
-        max_workers=1, ytdlp_cookies_file="", piper_voice_model="", piper_speaker="",
+        max_workers=1, ytdlp_cookies_file="", ytdlp_proxy="", ytdlp_impersonate="chrome", ytdlp_force_ipv4=False, piper_voice_model="", piper_speaker="",
     )
     commands = []
 
@@ -90,4 +108,4 @@ def test_story_render_assembles_local_assets_without_cloud(monkeypatch, tmp_path
     assert result["video"] == "story-reel.mp4"
     assert (tmp_path / result["subtitles"]).is_file()
     assert (tmp_path / result["thumbnail"]).is_file()
-    assert any("zoompan" in command[command.index("-vf") + 1] for command in commands if "-vf" in command)
+    assert any("fps=30" in command[command.index("-vf") + 1] for command in commands if "-vf" in command)

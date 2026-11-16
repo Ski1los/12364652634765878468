@@ -2,7 +2,12 @@ fastapi==0.115.6
 uvicorn[standard]==0.34.0
 python-multipart==0.0.20
 pydantic==2.10.5
-yt-dlp==2025.1.26
+# YouTube changes frequently; this current pin includes modern player extraction fixes.
+yt-dlp==2026.10.26
+# Enables yt-dlp browser impersonation for more reliable HTTPS/player requests.
+curl-cffi==0.17.0
+# Supplies an ffmpeg binary for bare-Python installs; Docker uses system FFmpeg.
+imageio-ffmpeg==0.6.0
 faster-whisper==1.1.1
 piper-tts==1.8.0
 Pillow==11.1.0

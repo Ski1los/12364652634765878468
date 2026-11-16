@@ -91,7 +91,7 @@
     <section id="story-studio" class="tool-panel story-studio" hidden aria-label="Создать оригинальную историю">
       <form id="story-form" class="card story-form">
         <div class="studio-head"><div><div class="card-kicker">STORY STUDIO</div><h2>Ролик из одной идеи</h2></div><span class="local-badge">LOCAL AI</span></div>
-        <p class="story-lead">Создаёт оригинальный сценарий, голосовую дорожку, анимированный вертикальный Story Reel, субтитры и текст для публикации. Сценарий работает через локальную LLM или через явно подтверждённый облачный endpoint.</p>
+        <p class="story-lead">Создаёт оригинальный сценарий, голосовую дорожку, анимированный вертикальный Story Reel, субтитры и текст для публикации. Без LLM используется прозрачный локальный шаблон — тема не уходит в сеть; подключите локальную LLM для более вариативного текста.</p>
         <label for="story-topic">О чём рассказать?</label>
         <textarea id="story-topic" required minlength="10" maxlength="900" placeholder="Например: вымышленная история о человеке, который нашёл странное письмо в старой книге"></textarea>
         <div class="idea-chips" aria-label="Примеры тем">
@@ -117,7 +117,7 @@
           </label>
         </div>
         <div class="voice-note"><span>♬</span><p><strong>Озвучка без облака.</strong> По умолчанию используется локальный eSpeak NG. Добавьте Piper-модель в <code>data/voices</code> — и ролики будут озвучиваться более естественным локальным голосом.</p></div>
-        <label class="consent story-consent"><input id="ai-disclosure" type="checkbox" required /><span>Я размещу понятную маркировку, что ролик создан с помощью ИИ, и не буду выдавать вымышленную историю за реальный факт.</span></label>
+        <label class="consent story-consent"><input id="ai-disclosure" type="checkbox" required /><span>Я размещу понятную маркировку об автоматической/ИИ-помощи, проверю текст и не буду выдавать вымышленную историю за реальный факт.</span></label>
         <label id="cloud-story-consent" class="consent cloud-consent" hidden><input id="cloud-story-allowed" type="checkbox" /><span>Разрешаю отправить тему и инструкцию в выбранный облачный LLM для создания сценария. Видео, голос и итоговый ролик останутся локально.</span></label>
         <div id="story-error" class="form-error" role="alert" hidden></div>
         <button id="story-submit" class="submit story-submit" type="submit"><span>Собрать Story Reel</span><b>✦</b></button>

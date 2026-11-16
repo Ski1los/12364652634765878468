@@ -103,14 +103,35 @@ def run_command(command: list[str], log: Log, *, cwd: Path | None = None) -> Non
         raise PipelineError(f"Команда не выполнилась (код {status}). {details}")
 
 
-def probe_duration(source: Path, log: Log) -> float:
-    command = [
-        "ffprobe", "-v", "error", "-show_entries", "format=duration",
-        "-of", "default=noprint_wrappers=1:nokey=1", str(source),
-    ]
-    result = subprocess.run(command, capture_output=True, text=True, check=False)
+def ffmpeg_executable() -> str:
+    """Prefer the system FFmpeg, with a wheel fallback for a bare pip install."""
+    if binary := shutil.which("ffmpeg"):
+        return binary
     try:
-        duration = float(result.stdout.strip())
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except (ImportError, RuntimeError):
+        # Keep the ordinary command name in the error if a deployment omitted both.
+        return "ffmpeg"
+
+
+def probe_duration(source: Path, log: Log) -> float:
+    ffprobe = shutil.which("ffprobe")
+    if ffprobe:
+        command = [
+            ffprobe, "-v", "error", "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1", str(source),
+        ]
+        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        value = result.stdout.strip()
+    else:
+        # imageio-ffmpeg intentionally bundles ffmpeg but not ffprobe. `-i`
+        # prints a reliable Duration line without decoding the entire media file.
+        result = subprocess.run([ffmpeg_executable(), "-i", str(source)], capture_output=True, text=True, check=False)
+        match = re.search(r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", result.stderr)
+        value = str(int(match.group(1)) * 3600 + int(match.group(2)) * 60 + float(match.group(3))) if match else ""
+    try:
+        duration = float(value)
     except ValueError as error:
         raise PipelineError("Не удалось прочитать длительность загруженного видео.") from error
     if not math.isfinite(duration) or duration <= 0:
@@ -119,15 +140,39 @@ def probe_duration(source: Path, log: Log) -> float:
     return duration
 
 
+def downloader_network_error(message: str) -> str | None:
+    """Turn noisy yt-dlp transport output into an actionable user-facing diagnostic."""
+    lowered = message.lower()
+    if any(marker in lowered for marker in (
+        "tls/ssl connection", "sslerror", "ssl_error_syscall", "certificate verify",
+        "connection has been closed", "connection closed abruptly",
+    )):
+        return (
+            "Сервер не смог установить HTTPS-соединение с YouTube. Это проблема сети/прокси "
+            "текущего сервера, а не видео или Whisper. В этой preview-песочнице внешние "
+            "видеохостинги могут быть заблокированы. Для своего сервера: пересоберите образ с "
+            "актуальным yt-dlp, оставьте YTDLP_IMPERSONATE=chrome; при корпоративной сети "
+            "укажите YTDLP_PROXY. Видео и cookies никуда дополнительно не отправляются."
+        )
+    return None
+
+
 def download_source(url: str, source_dir: Path, settings: Settings, log: Log) -> Path:
     source_dir.mkdir(parents=True, exist_ok=True)
     template = str(source_dir / "source.%(ext)s")
     command = [
         sys.executable, "-m", "yt_dlp",
         "--no-playlist", "--no-progress", "--restrict-filenames",
+        "--retries", "3", "--extractor-retries", "3", "--socket-timeout", "30",
         "--merge-output-format", "mp4", "--remux-video", "mp4",
         "-f", "bv*+ba/b", "-o", template,
     ]
+    if settings.ytdlp_impersonate:
+        command.extend(["--impersonate", settings.ytdlp_impersonate])
+    if settings.ytdlp_proxy:
+        command.extend(["--proxy", settings.ytdlp_proxy])
+    if settings.ytdlp_force_ipv4:
+        command.append("--force-ipv4")
     # A weak CPU can be made unusable by an accidental multi-hour VOD or 40 GB source.
     # Set either value to 0 in .env to explicitly remove that guard.
     if settings.max_source_minutes:
@@ -145,12 +190,16 @@ def download_source(url: str, source_dir: Path, settings: Settings, log: Log) ->
         run_command(command, log)
     except PipelineError as error:
         message = str(error)
-        if "Sign in to confirm" in message or "bot" in message.lower():
+        lowered = message.lower()
+        friendly = downloader_network_error(message)
+        if friendly:
+            raise PipelineError(friendly) from error
+        if "Sign in to confirm" in message or "bot" in lowered:
             raise PipelineError(
                 "YouTube запросил проверку доступа. Обновите yt-dlp и, если у вас есть право "
                 "просмотра, укажите Netscape cookies через YTDLP_COOKIES_FILE."
             ) from error
-        if "does not pass" in message or "max-filesize" in message.lower():
+        if "does not pass" in message or "max-filesize" in lowered:
             raise PipelineError(
                 "Источник превышает безопасный лимит этого профиля. Измените MAX_SOURCE_MINUTES "
                 "или MAX_SOURCE_MB в .env, если на диске достаточно места."
@@ -443,7 +492,7 @@ def render_clip(
     )
     duration = max(.25, candidate.end - candidate.start)
     command = [
-        "ffmpeg", "-y", "-ss", f"{candidate.start:.3f}", "-i", str(source), "-t", f"{duration:.3f}",
+        ffmpeg_executable(), "-y", "-ss", f"{candidate.start:.3f}", "-i", str(source), "-t", f"{duration:.3f}",
         "-filter_complex", filters, "-map", "[video]", "-map", "0:a?",
         "-threads", str(settings.ffmpeg_threads), "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
         "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", str(mp4_file),

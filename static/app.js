@@ -59,10 +59,11 @@ function storyMarkup(job) {
   const titles = (story.titles || [story.title]).map((title, index) => `<div class="title-option"><b>${index + 1}</b><span>${esc(title)}</span>${copyButton(title, 'копировать')}</div>`).join('');
   const captions = story.platform_captions || {};
   const platformCards = [['youtube_shorts','YouTube Shorts'],['tiktok','TikTok'],['instagram_reels','Instagram Reels']].map(([key, label]) => captions[key] ? `<div class="platform-copy"><strong>${label}</strong><p>${esc(captions[key])}</p>${copyButton(captions[key], 'скопировать подпись')}</div>` : '').join('');
+  const storyLabel = String(story.script_engine || '').includes('шаблон') ? 'LOCAL ORIGINAL STORY' : 'AI-ASSISTED STORY REEL';
   return `<section class="story-result">
     <div class="story-video-wrap"><video controls playsinline preload="metadata" poster="${story.thumbnail ? fileUrl(job, story.thumbnail) : ''}" src="${fileUrl(job, story.video)}"></video></div>
     <div class="story-result-copy">
-      <div class="story-result-eyebrow">AI-ASSISTED STORY REEL · ${esc(String(story.duration || '—'))} СЕК</div>
+      <div class="story-result-eyebrow">${esc(storyLabel)} · ${esc(String(story.duration || '—'))} СЕК</div>
       <h3>${esc(story.title || 'Новая история')}</h3>
       <p class="story-hook">${esc(story.hook || '')}</p>
       <p class="story-description">${esc(story.description || '')}</p>
@@ -76,7 +77,7 @@ function storyMarkup(job) {
         <a class="alt" href="${fileUrl(job, story.content_pack)}" download>ТЕКСТ ↓</a>
         <a class="kit-download" href="/api/jobs/${encodeURIComponent(job.id)}/download-all" download>CREATOR KIT ZIP ↓</a>
       </div>
-      <small>Голос: ${esc(story.voice_engine || 'локальный')}</small>
+      <small>Сценарий: ${esc(story.script_engine || 'LLM')} · Голос: ${esc(story.voice_engine || 'локальный')}</small>
     </div>
     <div class="launch-kit"><div class="launch-kit-label">LAUNCH KIT · ПРОВЕРЬТЕ ПЕРЕД ПУБЛИКАЦИЕЙ</div><div class="title-options">${titles}</div><div class="platform-copies">${platformCards}</div></div>
   </section>`;
@@ -96,7 +97,7 @@ function jobMarkup(job) {
   return `<article class="job ${job.kind === 'story' ? 'story-job' : job.kind === 'plan' ? 'plan-job' : ''}" id="job-${esc(job.id)}">
     <header class="job-header">
       <div><div class="job-title"><i class="status-dot ${esc(job.status)}"></i>${esc(stageLabel(job.status))}</div><div class="job-subtitle">${type} · ${esc(dateLabel(job.created_at))} · ${esc(job.id.slice(0, 8))}</div></div>
-      ${active ? '' : `<button class="delete-job" data-delete="${esc(job.id)}" title="Удалить файлы этой задачи">удалить</button>`}
+      <div class="job-actions">${job.status === 'failed' ? `<button class="retry-job" data-retry="${esc(job.id)}">повторить ↻</button>` : ''}${active ? '' : `<button class="delete-job" data-delete="${esc(job.id)}" title="Удалить файлы этой задачи">удалить</button>`}</div>
     </header>
     ${job.status === 'failed' ? `<div class="job-error">${esc(job.error || 'Задача не была завершена.')}</div>` : ''}
     ${job.status !== 'completed' ? `<div class="progress-wrap"><div class="progress-label"><span>${esc(stageLabel(job.status))}</span><span>${percent}%</span></div><div class="progress-bar"><span style="width:${percent}%"></span></div></div>` : ''}
@@ -110,6 +111,12 @@ function render() {
     if (!confirm('Удалить готовые файлы этой задачи с сервера?')) return;
     const response = await fetch(`/api/jobs/${encodeURIComponent(button.dataset.delete)}`, { method:'DELETE' });
     if (!response.ok) alert('Не удалось удалить задачу.');
+    await refresh();
+  }));
+  document.querySelectorAll('[data-retry]').forEach(button => button.addEventListener('click', async () => {
+    button.disabled = true; button.textContent = 'запуск…';
+    const response = await fetch(`/api/jobs/${encodeURIComponent(button.dataset.retry)}/retry`, { method:'POST' });
+    if (!response.ok) { const data = await response.json().catch(() => ({})); alert(apiError(data)); }
     await refresh();
   }));
   document.querySelectorAll('[data-copy]').forEach(button => button.addEventListener('click', async () => {
@@ -149,7 +156,6 @@ form.addEventListener('submit', async event => {
 });
 storyForm.addEventListener('submit', async event => {
   event.preventDefault(); hideError(storyError);
-  if (config && !config.story_ready) return showError(storyError, 'Настройте локальную Ollama или явный облачный OpenAI-совместимый endpoint. Инструкция и безопасные профили есть в README.');
   const payload = {
     topic:document.querySelector('#story-topic').value.trim(), story_kind:document.querySelector('#story-kind').value,
     language:document.querySelector('#story-language').value, duration_seconds:Number(document.querySelector('#story-duration').value),
@@ -168,7 +174,7 @@ storyForm.addEventListener('submit', async event => {
 });
 planForm.addEventListener('submit', async event => {
   event.preventDefault(); hideError(planError);
-  if (config && !config.story_ready) return showError(planError, 'Для Creator Plan настройте локальную Ollama или cloud endpoint.');
+  if (config && !config.plan_ready) return showError(planError, 'Для Creator Plan настройте локальную Ollama или явно подтверждённый cloud endpoint. Story Studio при этом может работать на локальном шаблоне.');
   const platforms = [...document.querySelectorAll('[name="plan-platform"]:checked')].map(input => input.value);
   if (!platforms.length) return showError(planError, 'Выберите хотя бы одну площадку.');
   const payload = {
@@ -198,7 +204,7 @@ document.querySelector('#refresh').addEventListener('click', refresh);
   try {
     const response = await fetch('/api/config'); config = await response.json();
     const voice = config.piper_voice_configured ? 'Piper настроен' : 'eSpeak local';
-    const provider = config.llm_provider === 'cloud' ? 'облачная LLM' : config.llm_provider === 'local' ? 'локальная LLM' : 'LLM не настроена';
+    const provider = config.story_engine === 'local_template' ? 'локальный сценарный шаблон' : config.llm_provider === 'cloud' ? 'облачная LLM' : 'локальная LLM';
     runtimeStatus.textContent = `Whisper ${config.whisper_model} · ${provider} · ${voice}`;
     if (config.cloud_consent_required) {
       cloudClipConsent.hidden = false;
@@ -208,7 +214,9 @@ document.querySelector('#refresh').addEventListener('click', refresh);
     const limits = config.source_limits || {};
     const minutes = limits.minutes ? `${limits.minutes} мин` : 'без лимита времени';
     const megabytes = limits.megabytes ? `${limits.megabytes} МБ` : 'без лимита размера';
-    hardwareProfile.innerHTML = `<strong>CPU-профиль:</strong> Whisper ${esc(config.whisper_model)} · ${esc(config.whisper_cpu_threads)} потоков · FFmpeg ${esc(config.ffmpeg_threads)} потоков · источник: ${esc(minutes)}, ${esc(megabytes)}.`;
+    const downloader = config.downloader || {};
+    const network = downloader.proxy_configured ? 'proxy настроен' : `yt-dlp: ${downloader.impersonation || 'стандартный режим'}`;
+    hardwareProfile.innerHTML = `<strong>CPU-профиль:</strong> Whisper ${esc(config.whisper_model)} · ${esc(config.whisper_cpu_threads)} потоков · FFmpeg ${esc(config.ffmpeg_threads)} потоков · источник: ${esc(minutes)}, ${esc(megabytes)} · ${esc(network)}.`;
   } catch { runtimeStatus.textContent = 'Локальный режим'; }
   refresh();
 })();

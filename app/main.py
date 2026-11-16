@@ -111,11 +111,21 @@ def config() -> dict[str, object]:
         "ffmpeg_threads": settings.ffmpeg_threads,
         "local_llm_enabled": bool(settings.local_llm_url),
         "llm_provider": target.provider if target else "none",
-        "story_ready": bool(target),
+        # Story Studio always has a local, transparent template fallback. Creator
+        # Plan intentionally remains LLM-powered because its editorial advice
+        # needs more context than a safe fixed template can provide.
+        "story_ready": True,
+        "story_engine": target.provider if target else "local_template",
+        "plan_ready": bool(target),
         "cloud_consent_required": bool(target and target.is_cloud),
         "piper_voice_configured": bool(settings.piper_voice_model),
         "max_workers": settings.max_workers,
         "source_limits": {"minutes": settings.max_source_minutes, "megabytes": settings.max_source_mb},
+        "downloader": {
+            "impersonation": settings.ytdlp_impersonate or "off",
+            "proxy_configured": bool(settings.ytdlp_proxy),
+            "force_ipv4": settings.ytdlp_force_ipv4,
+        },
         "supported_sources": ["YouTube", "Twitch VOD / clips"],
     }
 
@@ -132,12 +142,7 @@ def create_job(payload: CreateJob) -> dict:
 @app.post("/api/stories", status_code=202)
 def create_story(payload: CreateStory) -> dict:
     target = settings.active_llm
-    if not target:
-        raise HTTPException(
-            status_code=409,
-            detail="Story Studio требует локальную Ollama или настроенный облачный OpenAI-совместимый endpoint.",
-        )
-    if target.is_cloud and not payload.cloud_processing_allowed:
+    if target and target.is_cloud and not payload.cloud_processing_allowed:
         raise HTTPException(
             status_code=422,
             detail="Подтвердите передачу темы и инструкции в выбранный облачный LLM-сервис.",
@@ -169,6 +174,14 @@ def get_job(job_id: str) -> dict:
     if not job:
         raise HTTPException(status_code=404, detail="Задача не найдена.")
     return manager.public_job(job)
+
+
+@app.post("/api/jobs/{job_id}/retry", status_code=202)
+def retry_job(job_id: str) -> dict:
+    job = manager.retry(job_id)
+    if not job:
+        raise HTTPException(status_code=409, detail="Перезапустить можно только завершившуюся с ошибкой задачу.")
+    return job
 
 
 @app.delete("/api/jobs/{job_id}")
