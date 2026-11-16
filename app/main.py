@@ -18,6 +18,23 @@ ROOT = Path(__file__).resolve().parent.parent
 STATIC_DIR = ROOT / "static"
 
 
+class CreateStory(BaseModel):
+    topic: str = Field(min_length=10, max_length=900)
+    story_kind: Literal["fictional", "inspiration", "curiosity"] = "fictional"
+    language: Literal["ru", "en"] = "ru"
+    duration_seconds: Literal[30, 45, 60, 90] = 45
+    visual_style: Literal["cinematic", "comic", "minimal"] = "cinematic"
+    render_height: Literal[720, 1080] = 720
+    ai_disclosure_confirmed: bool = False
+
+    @model_validator(mode="after")
+    def check_disclosure(self) -> "CreateStory":
+        self.topic = " ".join(self.topic.split())
+        if not self.ai_disclosure_confirmed:
+            raise ValueError("Подтвердите маркировку ролика как созданного с помощью ИИ.")
+        return self
+
+
 class CreateJob(BaseModel):
     source_url: str = Field(min_length=12, max_length=2000)
     clip_count: int = Field(default=3, ge=1, le=8)
@@ -71,6 +88,7 @@ def config() -> dict[str, object]:
     return {
         "whisper_model": settings.whisper_model,
         "local_llm_enabled": bool(settings.local_llm_url),
+        "piper_voice_configured": bool(settings.piper_voice_model),
         "max_workers": settings.max_workers,
         "supported_sources": ["YouTube", "Twitch VOD / clips"],
     }
@@ -83,6 +101,11 @@ def create_job(payload: CreateJob) -> dict:
     except PipelineError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     return manager.create(payload.model_dump(exclude={"rights_confirmed"}))
+
+
+@app.post("/api/stories", status_code=202)
+def create_story(payload: CreateStory) -> dict:
+    return manager.create_story(payload.model_dump(exclude={"ai_disclosure_confirmed"}))
 
 
 @app.get("/api/jobs")
@@ -111,7 +134,10 @@ def get_file(job_id: str, filename: str) -> FileResponse:
     path = manager.file_path(job_id, filename)
     if not path:
         raise HTTPException(status_code=404, detail="Файл не найден.")
-    media_type = "video/mp4" if path.suffix.lower() == ".mp4" else "application/x-subrip"
+    media_type = {
+        ".mp4": "video/mp4", ".wav": "audio/wav", ".srt": "application/x-subrip",
+        ".txt": "text/plain; charset=utf-8", ".json": "application/json",
+    }.get(path.suffix.lower(), "application/octet-stream")
     # No Content-Disposition: attachment here: the same endpoint is used by <video>.
     # The UI's explicit download links carry the HTML `download` attribute.
     return FileResponse(path, media_type=media_type)

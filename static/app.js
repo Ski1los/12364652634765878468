@@ -1,24 +1,29 @@
 const form = document.querySelector('#job-form');
+const storyForm = document.querySelector('#story-form');
 const errorBox = document.querySelector('#form-error');
+const storyError = document.querySelector('#story-error');
 const submitButton = document.querySelector('#submit-button');
+const storySubmit = document.querySelector('#story-submit');
 const jobsNode = document.querySelector('#jobs');
 const emptyNode = document.querySelector('#empty-state');
 const runtimeStatus = document.querySelector('#runtime-status');
+const activeStatuses = new Set(['queued','downloading','transcribing','selecting','rendering','drafting','narrating','composing']);
 let jobs = [];
 let pollTimer = null;
+let config = null;
 
 function esc(value = '') {
   return String(value).replace(/[&<>'"]/g, char => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', "'":'&#39;', '"':'&quot;' }[char]));
 }
 function stageLabel(status) {
-  return ({ queued:'в очереди', downloading:'скачивание', transcribing:'локальная расшифровка', selecting:'выбор моментов', rendering:'рендер клипов', completed:'готово', failed:'ошибка' })[status] || status;
+  return ({ queued:'в очереди', downloading:'скачивание', transcribing:'локальная расшифровка', selecting:'выбор моментов', rendering:'рендер клипов', drafting:'сценарий', narrating:'локальная озвучка', composing:'сборка Story Reel', completed:'готово', failed:'ошибка' })[status] || status;
 }
 function dateLabel(iso) {
   try { return new Intl.DateTimeFormat('ru-RU',{dateStyle:'medium',timeStyle:'short'}).format(new Date(iso)); } catch { return iso || ''; }
 }
-function fileUrl(job, filename) {
-  return `/api/jobs/${encodeURIComponent(job.id)}/files/${encodeURIComponent(filename)}`;
-}
+function fileUrl(job, filename) { return `/api/jobs/${encodeURIComponent(job.id)}/files/${encodeURIComponent(filename)}`; }
+function showError(node, message) { node.textContent = message; node.hidden = false; }
+function hideError(node) { node.hidden = true; node.textContent = ''; }
 function logsMarkup(job) {
   if (!job.logs?.length) return '';
   const lines = job.logs.map(item => `[${new Date(item.at).toLocaleTimeString('ru-RU')}] ${item.message}`).join('\n');
@@ -28,7 +33,7 @@ function clipsMarkup(job) {
   if (!job.clips?.length) return '';
   return `<div class="clip-grid">${job.clips.map((clip, index) => `
     <article class="clip-card">
-      <video controls preload="metadata" src="${fileUrl(job, clip.video)}"></video>
+      <video controls playsinline preload="metadata" src="${fileUrl(job, clip.video)}"></video>
       <div class="clip-content">
         <h4>${esc(clip.title || `Момент ${index + 1}`)}</h4>
         <p>${esc(clip.reason || 'Выбранный фрагмент')}</p>
@@ -37,17 +42,42 @@ function clipsMarkup(job) {
       </div>
     </article>`).join('')}</div>`;
 }
+function storyMarkup(job) {
+  const story = job.story;
+  if (!story) return '';
+  const tags = (story.hashtags || []).map(tag => `<span>${esc(tag)}</span>`).join('');
+  return `<section class="story-result">
+    <div class="story-video-wrap"><video controls playsinline preload="metadata" src="${fileUrl(job, story.video)}"></video></div>
+    <div class="story-result-copy">
+      <div class="story-result-eyebrow">AI-ASSISTED STORY REEL · ${esc(String(story.duration || '—'))} СЕК</div>
+      <h3>${esc(story.title || 'Новая история')}</h3>
+      <p class="story-hook">${esc(story.hook || '')}</p>
+      <p class="story-description">${esc(story.description || '')}</p>
+      <div class="tag-row">${tags}</div>
+      <div class="story-disclosure">${esc(story.disclosure || 'Создано с помощью ИИ.')}</div>
+      <div class="downloads story-downloads">
+        <a href="${fileUrl(job, story.video)}" download>MP4 ↓</a>
+        <a class="alt" href="${fileUrl(job, story.subtitles)}" download>SRT ↓</a>
+        <a class="alt" href="${fileUrl(job, story.audio)}" download>WAV ↓</a>
+        <a class="alt" href="${fileUrl(job, story.content_pack)}" download>ТЕКСТ ↓</a>
+      </div>
+      <small>Голос: ${esc(story.voice_engine || 'локальный')}</small>
+    </div>
+  </section>`;
+}
 function jobMarkup(job) {
   const percent = Math.min(100, Math.max(0, Number(job.progress) || 0));
-  const deleting = ['queued','downloading','transcribing','selecting','rendering'].includes(job.status);
-  return `<article class="job" id="job-${esc(job.id)}">
+  const active = activeStatuses.has(job.status);
+  const type = job.kind === 'story' ? 'STORY REEL' : 'ВИДЕО-НАРЕЗКА';
+  const result = job.kind === 'story' ? storyMarkup(job) : clipsMarkup(job);
+  return `<article class="job ${job.kind === 'story' ? 'story-job' : ''}" id="job-${esc(job.id)}">
     <header class="job-header">
-      <div><div class="job-title"><i class="status-dot ${esc(job.status)}"></i>${esc(stageLabel(job.status))}</div><div class="job-subtitle">${esc(dateLabel(job.created_at))} · ${esc(job.id.slice(0, 8))}</div></div>
-      ${deleting ? '' : `<button class="delete-job" data-delete="${esc(job.id)}" title="Удалить файлы этой задачи">удалить</button>`}
+      <div><div class="job-title"><i class="status-dot ${esc(job.status)}"></i>${esc(stageLabel(job.status))}</div><div class="job-subtitle">${type} · ${esc(dateLabel(job.created_at))} · ${esc(job.id.slice(0, 8))}</div></div>
+      ${active ? '' : `<button class="delete-job" data-delete="${esc(job.id)}" title="Удалить файлы этой задачи">удалить</button>`}
     </header>
     ${job.status === 'failed' ? `<div class="job-error">${esc(job.error || 'Задача не была завершена.')}</div>` : ''}
     ${job.status !== 'completed' ? `<div class="progress-wrap"><div class="progress-label"><span>${esc(stageLabel(job.status))}</span><span>${percent}%</span></div><div class="progress-bar"><span style="width:${percent}%"></span></div></div>` : ''}
-    ${clipsMarkup(job)}${logsMarkup(job)}
+    ${result}${logsMarkup(job)}
   </article>`;
 }
 function render() {
@@ -64,48 +94,64 @@ async function refresh() {
   try {
     const response = await fetch('/api/jobs', { cache:'no-store' });
     if (!response.ok) throw new Error('Сервер не ответил');
-    jobs = await response.json();
-    render();
-    const active = jobs.some(job => ['queued','downloading','transcribing','selecting','rendering'].includes(job.status));
+    jobs = await response.json(); render();
+    const active = jobs.some(job => activeStatuses.has(job.status));
     if (active && !pollTimer) pollTimer = setInterval(refresh, 3500);
     if (!active && pollTimer) { clearInterval(pollTimer); pollTimer = null; }
-  } catch (error) {
-    runtimeStatus.textContent = 'Нет соединения с локальным сервером';
-  }
+  } catch { runtimeStatus.textContent = 'Нет соединения с локальным сервером'; }
 }
-function showError(message) { errorBox.textContent = message; errorBox.hidden = false; }
-function hideError() { errorBox.hidden = true; errorBox.textContent = ''; }
+function apiError(data) {
+  if (typeof data?.detail === 'string') return data.detail;
+  if (Array.isArray(data?.detail)) return data.detail.map(item => item.msg).join(' ');
+  return 'Не удалось создать задачу.';
+}
 form.addEventListener('submit', async event => {
-  event.preventDefault(); hideError();
+  event.preventDefault(); hideError(errorBox);
   const minSeconds = Number(document.querySelector('#min-seconds').value);
   const maxSeconds = Number(document.querySelector('#max-seconds').value);
-  if (maxSeconds <= minSeconds) return showError('Максимальная длительность должна быть больше минимальной.');
-  const payload = {
-    source_url: document.querySelector('#source-url').value.trim(),
-    clip_count: Number(document.querySelector('#clip-count').value),
-    min_seconds: minSeconds,
-    max_seconds: maxSeconds,
-    render_height: Number(document.querySelector('#render-height').value),
-    rights_confirmed: document.querySelector('#rights').checked,
-  };
+  if (maxSeconds <= minSeconds) return showError(errorBox, 'Максимальная длительность должна быть больше минимальной.');
+  const payload = { source_url:document.querySelector('#source-url').value.trim(), clip_count:Number(document.querySelector('#clip-count').value), min_seconds:minSeconds, max_seconds:maxSeconds, render_height:Number(document.querySelector('#render-height').value), rights_confirmed:document.querySelector('#rights').checked };
   submitButton.disabled = true; submitButton.querySelector('span').textContent = 'Добавляю в очередь…';
   try {
     const response = await fetch('/api/jobs', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || 'Не удалось создать задачу.');
+    const data = await response.json(); if (!response.ok) throw new Error(apiError(data));
     form.reset(); document.querySelector('#clip-count').value = '3'; document.querySelector('#render-height').value = '720';
-    jobs.unshift(data); render();
-    document.querySelector('.jobs-section').scrollIntoView({ behavior:'smooth', block:'start' });
-    await refresh();
-  } catch (error) { showError(error.message || 'Не удалось создать задачу.'); }
+    jobs.unshift(data); render(); document.querySelector('.jobs-section').scrollIntoView({ behavior:'smooth', block:'start' }); await refresh();
+  } catch (error) { showError(errorBox, error.message || 'Не удалось создать задачу.'); }
   finally { submitButton.disabled = false; submitButton.querySelector('span').textContent = 'Найти моменты'; }
 });
+storyForm.addEventListener('submit', async event => {
+  event.preventDefault(); hideError(storyError);
+  if (config && !config.local_llm_enabled) return showError(storyError, 'Подключите локальную Ollama — Story Studio не отправляет идеи в платные облачные API. Инструкция есть в README.');
+  const payload = {
+    topic:document.querySelector('#story-topic').value.trim(), story_kind:document.querySelector('#story-kind').value,
+    language:document.querySelector('#story-language').value, duration_seconds:Number(document.querySelector('#story-duration').value),
+    visual_style:document.querySelector('#story-style').value, render_height:Number(document.querySelector('#story-height').value),
+    ai_disclosure_confirmed:document.querySelector('#ai-disclosure').checked,
+  };
+  storySubmit.disabled = true; storySubmit.querySelector('span').textContent = 'Пишу и собираю…';
+  try {
+    const response = await fetch('/api/stories', { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload) });
+    const data = await response.json(); if (!response.ok) throw new Error(apiError(data));
+    storyForm.reset(); document.querySelector('#story-duration').value = '45'; document.querySelector('#story-height').value = '720';
+    jobs.unshift(data); render(); document.querySelector('.jobs-section').scrollIntoView({ behavior:'smooth', block:'start' }); await refresh();
+  } catch (error) { showError(storyError, error.message || 'Не удалось собрать Story Reel.'); }
+  finally { storySubmit.disabled = false; storySubmit.querySelector('span').textContent = 'Собрать Story Reel'; }
+});
+document.querySelectorAll('[data-idea]').forEach(button => button.addEventListener('click', () => {
+  document.querySelector('#story-topic').value = button.dataset.idea; document.querySelector('#story-topic').focus();
+}));
+document.querySelectorAll('.tool-tab').forEach(button => button.addEventListener('click', () => {
+  document.querySelectorAll('.tool-tab').forEach(tab => tab.classList.toggle('is-active', tab === button));
+  document.querySelectorAll('.tool-panel').forEach(panel => panel.hidden = panel.id !== button.dataset.panel);
+  document.querySelector(`#${button.dataset.panel}`).scrollIntoView({ behavior:'smooth', block:'start' });
+}));
 document.querySelector('#refresh').addEventListener('click', refresh);
 (async () => {
   try {
-    const response = await fetch('/api/config');
-    const data = await response.json();
-    runtimeStatus.textContent = `Whisper ${data.whisper_model} · ${data.local_llm_enabled ? 'Ollama подключена' : 'эвристика + Whisper'}`;
+    const response = await fetch('/api/config'); config = await response.json();
+    const voice = config.piper_voice_configured ? 'Piper настроен' : 'eSpeak local';
+    runtimeStatus.textContent = `Whisper ${config.whisper_model} · ${config.local_llm_enabled ? 'Ollama подключена' : 'Ollama не подключена'} · ${voice}`;
   } catch { runtimeStatus.textContent = 'Локальный режим'; }
   refresh();
 })();

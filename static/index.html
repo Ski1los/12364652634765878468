@@ -15,17 +15,22 @@
 
   <main id="top">
     <section class="hero">
-      <div class="eyebrow">ВИДЕО → SHORTS, НА ВАШЕМ КОМПЬЮТЕРЕ</div>
-      <h1>Найдите моменты,<br /><strong>которые невозможно<br />не досмотреть.</strong></h1>
-      <p class="intro">Вставьте ссылку на YouTube или Twitch VOD. ClipLab локально расшифрует речь, найдёт реакции и неожиданные фрагменты, соберёт вертикальные клипы и вшьёт субтитры.</p>
+      <div class="eyebrow">СОЗДАВАЙТЕ SHORTS НА СВОЁМ СЕРВЕРЕ</div>
+      <h1>От сырого видео<br />до <strong>истории,<br />которую досмотрят.</strong></h1>
+      <p class="intro">Нарезайте свои стримы и интервью или соберите оригинальный Story Reel: сценарий, локальная озвучка, вертикальное видео, субтитры и готовый текст для публикации — всё хранится у вас.</p>
       <div class="promise-list" aria-label="Преимущества">
-        <span><b>01</b> Никаких платных API</span>
-        <span><b>02</b> Исходник остаётся у вас</span>
-        <span><b>03</b> MP4 + отдельные SRT</span>
+        <span><b>01</b> Без платных API</span>
+        <span><b>02</b> Аудио и файлы у вас</span>
+        <span><b>03</b> MP4 + SRT + контент-пак</span>
       </div>
     </section>
 
-    <section class="workspace" aria-label="Создать задачу">
+    <nav class="tool-tabs" aria-label="Инструменты">
+      <button class="tool-tab is-active" type="button" data-panel="clip-studio"><span>✂</span> Нарезка видео</button>
+      <button class="tool-tab" type="button" data-panel="story-studio"><span>✦</span> Story Studio <small>LOCAL AI</small></button>
+    </nav>
+
+    <section id="clip-studio" class="tool-panel workspace" aria-label="Нарезать видео">
       <form id="job-form" class="card form-card">
         <div class="card-kicker">НОВАЯ ОБРАБОТКА</div>
         <label class="url-label" for="source-url">Ссылка на видео</label>
@@ -81,6 +86,47 @@
       </aside>
     </section>
 
+    <section id="story-studio" class="tool-panel story-studio" hidden aria-label="Создать оригинальную историю">
+      <form id="story-form" class="card story-form">
+        <div class="studio-head"><div><div class="card-kicker">STORY STUDIO</div><h2>Ролик из одной идеи</h2></div><span class="local-badge">LOCAL AI</span></div>
+        <p class="story-lead">Создаёт оригинальный сценарий, голосовую дорожку, анимированный вертикальный Story Reel, субтитры и текст для публикации. Для сценария нужна подключённая локальная Ollama.</p>
+        <label for="story-topic">О чём рассказать?</label>
+        <textarea id="story-topic" required minlength="10" maxlength="900" placeholder="Например: вымышленная история о человеке, который нашёл странное письмо в старой книге"></textarea>
+        <div class="idea-chips" aria-label="Примеры тем">
+          <button type="button" data-idea="Вымышленная история о записке, которую герой нашёл в старой библиотечной книге">Неожиданная находка</button>
+          <button type="button" data-idea="Короткая вымышленная история о добром поступке, который вернулся спустя годы">Тёплая история</button>
+          <button type="button" data-idea="Загадочная, но безопасная вымышленная история о лифте, который останавливался на несуществующем этаже">Лёгкая загадка</button>
+        </div>
+        <div class="story-grid">
+          <label>Формат
+            <select id="story-kind"><option value="fictional">Вымышленная история</option><option value="inspiration">Вдохновляющий сюжет</option><option value="curiosity">Безопасная загадка</option></select>
+          </label>
+          <label>Язык
+            <select id="story-language"><option value="ru">Русский</option><option value="en">English</option></select>
+          </label>
+          <label>Длина
+            <select id="story-duration"><option value="30">≈ 30 секунд</option><option value="45" selected>≈ 45 секунд</option><option value="60">≈ 60 секунд</option><option value="90">≈ 90 секунд</option></select>
+          </label>
+          <label>Визуальный тон
+            <select id="story-style"><option value="cinematic">Кинематографичный</option><option value="comic">Ироничный</option><option value="minimal">Минимализм</option></select>
+          </label>
+          <label>Качество
+            <select id="story-height"><option value="720" selected>720 × 1280</option><option value="1080">1080 × 1920</option></select>
+          </label>
+        </div>
+        <div class="voice-note"><span>♬</span><p><strong>Озвучка без облака.</strong> По умолчанию используется локальный eSpeak NG. Добавьте Piper-модель в <code>data/voices</code> — и ролики будут озвучиваться более естественным локальным голосом.</p></div>
+        <label class="consent story-consent"><input id="ai-disclosure" type="checkbox" required /><span>Я размещу понятную маркировку, что ролик создан с помощью ИИ, и не буду выдавать вымышленную историю за реальный факт.</span></label>
+        <div id="story-error" class="form-error" role="alert" hidden></div>
+        <button id="story-submit" class="submit story-submit" type="submit"><span>Собрать Story Reel</span><b>✦</b></button>
+      </form>
+      <aside class="card story-preview">
+        <div class="card-kicker">ЧТО ВЫ ПОЛУЧИТЕ</div>
+        <div class="phone-frame" aria-hidden="true"><div class="phone-notch"></div><div class="phone-screen"><span>STORY REEL</span><strong>Ваша идея<br />становится<br />историей.</strong><i></i><small>СЦЕНАРИЙ · ГОЛОС · СУБТИТРЫ</small></div></div>
+        <div class="output-list"><div><b>01</b><span>Оригинальный сценарий из 5–8 сцен</span></div><div><b>02</b><span>WAV-озвучка и готовый MP4</span></div><div><b>03</b><span>SRT, заголовок, описание и хэштеги</span></div></div>
+        <p class="honest-note">Автогенерация не гарантирует просмотры или доход. Перед публикацией проверьте факты, качество и правила платформы.</p>
+      </aside>
+    </section>
+
     <section class="jobs-section" aria-live="polite">
       <div class="section-heading">
         <div><span class="eyebrow">ЛОКАЛЬНЫЕ ЗАДАЧИ</span><h2>Результаты</h2></div>
@@ -88,8 +134,8 @@
       </div>
       <div id="empty-state" class="empty-state">
         <span class="empty-mark">✦</span>
-        <h3>Здесь появятся ваши клипы</h3>
-        <p>Вставьте ссылку выше — готовые MP4 и файлы субтитров останутся на этом сервере, пока вы их не удалите.</p>
+        <h3>Здесь появятся ваши ролики</h3>
+        <p>Нарезайте своё видео или создайте Story Reel. Готовые MP4, субтитры и тексты останутся на этом сервере, пока вы их не удалите.</p>
       </div>
       <div id="jobs" class="jobs"></div>
     </section>

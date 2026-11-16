@@ -10,10 +10,11 @@ from pathlib import Path
 from typing import Any
 
 from .pipeline import PipelineError, remove_job_files, run_pipeline
+from .story import run_story_pipeline
 from .settings import Settings
 from .storage import read_json, write_json
 
-ACTIVE_STATES = {"queued", "downloading", "transcribing", "selecting", "rendering"}
+ACTIVE_STATES = {"queued", "downloading", "transcribing", "selecting", "rendering", "drafting", "narrating", "composing"}
 
 
 def now() -> str:
@@ -52,6 +53,7 @@ class JobManager:
         job_id = uuid.uuid4().hex
         job = {
             "id": job_id,
+            "kind": "clip",
             "source_url": payload["source_url"],
             "clip_count": payload["clip_count"],
             "min_seconds": payload["min_seconds"],
@@ -63,6 +65,32 @@ class JobManager:
             "error": None,
             "clips": [],
             "logs": [{"at": now(), "message": "Задача добавлена в локальную очередь."}],
+            "created_at": now(),
+            "updated_at": now(),
+        }
+        with self._lock:
+            self._jobs[job_id] = job
+            self._save(job)
+        self._executor.submit(self._work, job_id)
+        return self.public_job(job)
+
+    def create_story(self, payload: dict[str, Any]) -> dict[str, Any]:
+        job_id = uuid.uuid4().hex
+        job = {
+            "id": job_id,
+            "kind": "story",
+            "topic": payload["topic"],
+            "story_kind": payload["story_kind"],
+            "language": payload["language"],
+            "duration_seconds": payload["duration_seconds"],
+            "visual_style": payload["visual_style"],
+            "render_height": payload["render_height"],
+            "status": "queued",
+            "stage": "queued",
+            "progress": 0,
+            "error": None,
+            "story": None,
+            "logs": [{"at": now(), "message": "Story Reel добавлен в локальную очередь."}],
             "created_at": now(),
             "updated_at": now(),
         }
@@ -101,6 +129,12 @@ class JobManager:
                 self._set_stage(job_id, "transcribing", 35)
             elif "ищу потенциально" in lower or "языковая модель" in lower:
                 self._set_stage(job_id, "selecting", 58)
+            elif "локальная llm пишет" in lower:
+                self._set_stage(job_id, "drafting", 22)
+            elif "озвучиваю" in lower:
+                self._set_stage(job_id, "narrating", 52)
+            elif "сторис-карточки" in lower or "вшиваю субтитры" in lower:
+                self._set_stage(job_id, "composing", 76)
             elif "рендер " in lower:
                 self._set_stage(job_id, "rendering", 72)
             self._log(job_id, message)
@@ -108,8 +142,12 @@ class JobManager:
         try:
             with self._lock:
                 snapshot = dict(self._jobs[job_id])
-            clips = run_pipeline(snapshot, self.settings, log)
-            self._update(job_id, status="completed", stage="completed", progress=100, clips=clips, error=None)
+            if snapshot.get("kind") == "story":
+                story = run_story_pipeline(snapshot, self.settings, log)
+                self._update(job_id, status="completed", stage="completed", progress=100, story=story, error=None)
+            else:
+                clips = run_pipeline(snapshot, self.settings, log)
+                self._update(job_id, status="completed", stage="completed", progress=100, clips=clips, error=None)
         except PipelineError as error:
             self._log(job_id, str(error))
             self._update(job_id, status="failed", stage="failed", progress=100, error=str(error))

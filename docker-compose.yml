@@ -12,6 +12,9 @@ services:
       LOCAL_LLM_MODEL: ${LOCAL_LLM_MODEL:-qwen2.5:7b}
       MAX_WORKERS: ${MAX_WORKERS:-1}
       YTDLP_COOKIES_FILE: ${YTDLP_COOKIES_FILE:-}
+      # Optional natural local Piper voice model, mounted from ./data/voices.
+      PIPER_VOICE_MODEL: ${PIPER_VOICE_MODEL:-}
+      PIPER_SPEAKER: ${PIPER_SPEAKER:-}
     volumes:
       - ./data:/data
     restart: unless-stopped
