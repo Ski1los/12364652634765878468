@@ -1,0 +1,32 @@
+services:
+  clipper:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      # All processing stays on this machine. Change only if a local Ollama
+      # server is available; leaving it blank uses the deterministic local scorer.
+      DATA_DIR: /data
+      WHISPER_MODEL: ${WHISPER_MODEL:-small}
+      LOCAL_LLM_URL: ${LOCAL_LLM_URL:-}
+      LOCAL_LLM_MODEL: ${LOCAL_LLM_MODEL:-qwen2.5:7b}
+      MAX_WORKERS: ${MAX_WORKERS:-1}
+      YTDLP_COOKIES_FILE: ${YTDLP_COOKIES_FILE:-}
+    volumes:
+      - ./data:/data
+    restart: unless-stopped
+
+  # Optional and entirely local. Start it with:
+  #   docker compose --profile ai up -d
+  # Then fetch a free local model once:
+  #   docker compose exec ollama ollama pull qwen2.5:7b
+  # Set LOCAL_LLM_URL=http://ollama:11434/v1 in .env and restart clipper.
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ai"]
+    volumes:
+      - ollama:/root/.ollama
+    restart: unless-stopped
+
+volumes:
+  ollama:

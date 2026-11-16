@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Локальное создание коротких видео с субтитрами без платных API." />
+  <title>ClipLab Local — моменты из видео</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#top" aria-label="ClipLab Local">clip<span>lab</span><em>local</em></a>
+    <div class="local-status"><i></i><span>Local-first · без водяного знака</span></div>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div class="eyebrow">ВИДЕО → SHORTS, НА ВАШЕМ КОМПЬЮТЕРЕ</div>
+      <h1>Найдите моменты,<br /><strong>которые невозможно<br />не досмотреть.</strong></h1>
+      <p class="intro">Вставьте ссылку на YouTube или Twitch VOD. ClipLab локально расшифрует речь, найдёт реакции и неожиданные фрагменты, соберёт вертикальные клипы и вшьёт субтитры.</p>
+      <div class="promise-list" aria-label="Преимущества">
+        <span><b>01</b> Никаких платных API</span>
+        <span><b>02</b> Исходник остаётся у вас</span>
+        <span><b>03</b> MP4 + отдельные SRT</span>
+      </div>
+    </section>
+
+    <section class="workspace" aria-label="Создать задачу">
+      <form id="job-form" class="card form-card">
+        <div class="card-kicker">НОВАЯ ОБРАБОТКА</div>
+        <label class="url-label" for="source-url">Ссылка на видео</label>
+        <div class="url-row">
+          <span class="link-mark">↗</span>
+          <input id="source-url" name="source_url" type="url" required maxlength="2000" autocomplete="url" placeholder="https://www.youtube.com/watch?v=…" />
+        </div>
+        <p class="hint">Поддерживаются YouTube и Twitch VOD/клипы. Прямые эфиры и защищённые/приватные видео не поддерживаются.</p>
+
+        <div class="form-grid">
+          <label>Сколько клипов
+            <select id="clip-count" name="clip_count">
+              <option value="2">2 клипа</option>
+              <option value="3" selected>3 клипа</option>
+              <option value="4">4 клипа</option>
+              <option value="5">5 клипов</option>
+              <option value="6">6 клипов</option>
+            </select>
+          </label>
+          <label>Качество
+            <select id="render-height" name="render_height">
+              <option value="720" selected>720 × 1280 · быстрее</option>
+              <option value="1080">1080 × 1920 · лучше</option>
+            </select>
+          </label>
+        </div>
+        <fieldset class="duration-fieldset">
+          <legend>Длительность одного клипа</legend>
+          <div class="duration-inputs">
+            <label><input id="min-seconds" type="number" min="10" max="90" value="20" required /><small>от, сек</small></label>
+            <span>—</span>
+            <label><input id="max-seconds" type="number" min="15" max="150" value="50" required /><small>до, сек</small></label>
+          </div>
+        </fieldset>
+        <label class="consent"><input id="rights" type="checkbox" required /><span>У меня есть права или разрешение на обработку этого видео.</span></label>
+        <div id="form-error" class="form-error" role="alert" hidden></div>
+        <button id="submit-button" class="submit" type="submit"><span>Найти моменты</span><b>→</b></button>
+        <p class="under-button">Обработка идёт в браузерной очереди этого сервера. Не закрывайте сервер, страницу можно закрыть.</p>
+      </form>
+
+      <aside class="card intelligence-card">
+        <div class="card-kicker">КАК ВЫБИРАЕМ</div>
+        <div class="radar" aria-hidden="true"><div></div><div></div><div></div><span></span></div>
+        <h2>Не случайные нарезки.</h2>
+        <p>Локальный анализ ищет смех, удивление, эмоциональные реакции, выразительную речь и цельные фразы.</p>
+        <ol>
+          <li><span>01</span> Скачивание и проверка источника</li>
+          <li><span>02</span> Локальная расшифровка Whisper</li>
+          <li><span>03</span> Ранжирование реакций и сцен</li>
+          <li><span>04</span> Вертикальный MP4 с субтитрами</li>
+        </ol>
+        <p class="optional-ai"><strong>Опционально:</strong> локальная Ollama-модель учитывает смысл диалога, если она подключена.</p>
+      </aside>
+    </section>
+
+    <section class="jobs-section" aria-live="polite">
+      <div class="section-heading">
+        <div><span class="eyebrow">ЛОКАЛЬНЫЕ ЗАДАЧИ</span><h2>Результаты</h2></div>
+        <button class="refresh" id="refresh" type="button">Обновить <span>↻</span></button>
+      </div>
+      <div id="empty-state" class="empty-state">
+        <span class="empty-mark">✦</span>
+        <h3>Здесь появятся ваши клипы</h3>
+        <p>Вставьте ссылку выше — готовые MP4 и файлы субтитров останутся на этом сервере, пока вы их не удалите.</p>
+      </div>
+      <div id="jobs" class="jobs"></div>
+    </section>
+  </main>
+
+  <footer><span>CLIPLAB LOCAL</span><span>Сделано для самостоятельного хостинга</span><span id="runtime-status">Проверяю локальную конфигурацию…</span></footer>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>
