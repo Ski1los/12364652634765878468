@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from app.settings import Settings
-from app.story import create_scene_cards, generate_script, render_story, write_content_pack
+from app.story import build_story_filtergraph, create_scene_cards, generate_script, render_story, write_content_pack
 
 
 class FakeResponse:
@@ -68,7 +68,7 @@ def test_story_uses_a_transparent_local_template_when_llm_is_missing(tmp_path):
         "language": "ru", "duration_seconds": 45, "visual_style": "cinematic",
     }, settings, lambda _: None)
     assert story["script_engine"] == "Локальный сценарный шаблон (без LLM)"
-    assert len(story["scenes"]) == 5
+    assert len(story["scenes"]) == 6
     assert story["platform_captions"]["tiktok"] == story["description"]
     assert "LLM" not in story["disclosure"]
 
@@ -108,4 +108,20 @@ def test_story_render_assembles_local_assets_without_cloud(monkeypatch, tmp_path
     assert result["video"] == "story-reel.mp4"
     assert (tmp_path / result["subtitles"]).is_file()
     assert (tmp_path / result["thumbnail"]).is_file()
-    assert any("fps=30" in command[command.index("-vf") + 1] for command in commands if "-vf" in command)
+    graphs = [command[command.index("-filter_complex") + 1] for command in commands if "-filter_complex" in command]
+    assert graphs and "zoompan" in graphs[0] and "xfade" in graphs[0] and "subtitles" in graphs[0]
+
+
+def test_story_filtergraph_keeps_audio_length_and_smooth_crossfades():
+    lengths = [10.0, 10.0, 10.0, 10.0]
+    graph = build_story_filtergraph(lengths, 720, 1280, fade=0.6, fps=30, subtitle_path="subs.ass")
+    # Every card gets an animated zoom, then consecutive crossfades overlap scenes.
+    assert graph.count("zoompan") == 4
+    assert graph.count("xfade=transition=fade:duration=0.600") == 3
+    assert "offset=9.400" in graph and "offset=18.800" in graph and "offset=28.200" in graph
+    assert graph.endswith("[vout]")
+
+
+def test_story_filtergraph_handles_a_single_scene_without_xfade():
+    graph = build_story_filtergraph([12.0], 720, 1280)
+    assert "zoompan" in graph and "xfade" not in graph

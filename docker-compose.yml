@@ -32,6 +32,12 @@ services:
       # Optional natural local Piper voice model, mounted from ./data/voices.
       PIPER_VOICE_MODEL: ${PIPER_VOICE_MODEL:-}
       PIPER_SPEAKER: ${PIPER_SPEAKER:-}
+    # Если контейнер не может разрешить DNS (curl: (6) Could not resolve host /
+    # Temporary failure in name resolution), раскомментируйте рабочие DNS-серверы —
+    # они заменят унаследованный от хоста DNS только для этого сервиса:
+    # dns:
+    #   - 1.1.1.1
+    #   - 8.8.8.8
     volumes:
       - ./data:/data
     restart: unless-stopped

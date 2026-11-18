@@ -462,7 +462,9 @@ def write_captions(words: list[Word], clip_start: float, width: int, height: int
     ass_lines = [
         "[Script Info]", "ScriptType: v4.00+", f"PlayResX: {width}", f"PlayResY: {height}", "",
         "[V4+ Styles]",
-        f"Style: Caption,DejaVu Sans,{max(28, round(height * .051))},&H00FFFFFF,&H000000FF,&H00101010,&H00000000,1,1,0,0,100,100,0,0,1,{max(2, round(height * .004))},1,2,{round(height * .78)},40,40,1",
+        # Bold upright white text, thin dark outline, sane side margins and a bottom
+        # offset that scales with the frame: readable on phones without covering faces.
+        f"Style: Caption,DejaVu Sans,{max(28, round(height * .051))},&H00FFFFFF,&H000000FF,&H00101010,&H00000000,-1,0,0,0,100,100,0,0,1,{max(2, round(height * .004))},1,2,{round(width * .07)},{round(width * .07)},{round(height * .05)},1",
         "", "[Events]", "Format: Layer,Start,End,Style,Name,MarginL,MarginR,MarginV,Effect,Text",
     ]
     for index, (start, end, text) in enumerate(groups, start=1):

@@ -13,7 +13,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Callable
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
 from .errors import PipelineError
 from .llm import chat_completion
@@ -31,6 +31,13 @@ PALETTES = [
     ("#202c39", "#d9e76c", "#eff4de"),
     ("#1b263b", "#79c2d0", "#e2f5f8"),
 ]
+
+# Story Reel motion defaults: a slow Ken Burns zoom plus soft crossfades turn the
+# scene cards into an actual video instead of a static slideshow.
+STORY_FPS = 30
+CROSSFADE_SECONDS = 0.6
+KEN_BURNS_ZOOM = 0.12
+CARD_OVERSAMPLE = 2  # cards are rendered at 2x so the zoom stays sharp and smooth
 
 
 def _as_text(value: object, limit: int, fallback: str = "") -> str:
@@ -84,7 +91,7 @@ def _story_prompt(job: dict[str, Any]) -> str:
    {{"narration":"текст для озвучки", "on_screen_text":"2–8 слов на экране", "visual_prompt":"описание абстрактной безопасной сцены без реальных людей"}}
  ]
 }}
-Нужно 5–8 сцен, суммарно примерно нужной длительности."""
+Нужно 6–9 сцен. Каждая сцена — 2–4 коротких предложения (примерно 18–35 слов narration), чтобы суммарная озвучка попадала в целевую длительность."""
 
 
 def _local_template_script(job: dict[str, Any], log: Log) -> dict[str, Any]:
@@ -96,7 +103,9 @@ def _local_template_script(job: dict[str, Any], log: Log) -> dict[str, Any]:
     topic = _as_text(job.get("topic"), 180, "a small change")
     is_russian = job.get("language") == "ru"
     duration = int(job.get("duration_seconds", 45))
-    target_words = int(duration * (1.8 if is_russian else 2.0))
+    # Local TTS reads at roughly two words per second; asking for enough words is
+    # what actually makes the finished reel last as long as the user picked.
+    target_words = int(duration * (2.2 if is_russian else 2.4))
     if is_russian:
         kind = {"fictional": "вымышленная история", "inspiration": "вымышленная вдохновляющая история", "curiosity": "вымышленная лёгкая загадка"}.get(job.get("story_kind"), "вымышленная история")
         scenes = [
@@ -134,7 +143,7 @@ def _local_template_script(job: dict[str, Any], log: Log) -> dict[str, Any]:
         filler = "This is not advice or a promise of results. It is simply a calm pause before choosing a next step."
         titles = [title, "One small detail changes the story", "A quiet next step"]
 
-    scene_count = 5 if duration <= 45 else 6 if duration <= 60 else 8
+    scene_count = 6 if duration <= 45 else 7 if duration <= 60 else 8
     scenes = scenes[:scene_count]
     filler_index = 0
     while sum(len(scene["narration"].split()) for scene in scenes) < target_words:
@@ -230,6 +239,55 @@ def generate_script(job: dict[str, Any], settings: Settings, log: Log) -> dict[s
     }
 
 
+# --- card artwork -----------------------------------------------------------
+
+
+def _hex(value: str) -> tuple[int, int, int]:
+    raw = value.lstrip("#")
+    return int(raw[0:2], 16), int(raw[2:4], 16), int(raw[4:6], 16)
+
+
+def _lerp_color(start: tuple[int, int, int], end: tuple[int, int, int], ratio: float) -> tuple[int, int, int]:
+    return tuple(int(round(a + (b - a) * ratio)) for a, b in zip(start, end))
+
+
+def _vertical_gradient(size: tuple[int, int], top: tuple[int, int, int], bottom: tuple[int, int, int]) -> Image.Image:
+    width, height = size
+    image = Image.new("RGB", size)
+    draw = ImageDraw.Draw(image)
+    for y in range(height):
+        draw.line([(0, y), (width, y)], fill=_lerp_color(top, bottom, y / max(1, height - 1)))
+    return image
+
+
+def _glow_blobs(image: Image.Image, accent: str, pale: str) -> Image.Image:
+    """Soft out-of-focus light spots make flat cards look lit, not clip-art flat."""
+    width, height = image.size
+    layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(layer)
+    draw.ellipse((-width * .45, -height * .16, width * .55, height * .38), fill=(*_hex(accent), 165))
+    draw.ellipse((width * .55, height * .62, width * 1.45, height * 1.12), fill=(*_hex(accent), 70))
+    draw.ellipse((width * .62, -height * .08, width * 1.15, height * .16), fill=(*_hex(pale), 46))
+    layer = layer.filter(ImageFilter.GaussianBlur(radius=max(12, height // 11)))
+    return Image.alpha_composite(image.convert("RGBA"), layer).convert("RGB")
+
+
+def _legibility_shade(image: Image.Image) -> Image.Image:
+    """Darken the caption strip and the top edge so white text stays readable."""
+    width, height = image.size
+    overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    draw = ImageDraw.Draw(overlay)
+    bottom_start = round(height * .60)
+    for y in range(bottom_start, height):
+        alpha = round(150 * (y - bottom_start) / max(1, height - bottom_start))
+        draw.line([(0, y), (width, y)], fill=(0, 0, 0, alpha))
+    top_end = round(height * .14)
+    for y in range(top_end):
+        alpha = round(95 * (1 - y / max(1, top_end)))
+        draw.line([(0, y), (width, y)], fill=(0, 0, 0, alpha))
+    return Image.alpha_composite(image.convert("RGBA"), overlay).convert("RGB")
+
+
 def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
     candidates = (
         ["/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "/Library/Fonts/Arial Bold.ttf"]
@@ -257,13 +315,41 @@ def _wrap(draw: ImageDraw.ImageDraw, text: str, font: ImageFont.ImageFont, maxim
     return "\n".join(lines[:5])
 
 
-def _draw_centered(draw: ImageDraw.ImageDraw, box: tuple[int, int, int, int], text: str, font: ImageFont.ImageFont, fill: str, spacing: int = 8) -> None:
+def _draw_centered(
+    draw: ImageDraw.ImageDraw,
+    box: tuple[int, int, int, int],
+    text: str,
+    font: ImageFont.ImageFont,
+    fill: str,
+    spacing: int = 8,
+    stroke: int = 0,
+    stroke_fill: str = "#000000",
+) -> None:
     left, top, right, bottom = box
     wrapped = _wrap(draw, text, font, right - left)
     bounds = draw.multiline_textbbox((0, 0), wrapped, font=font, spacing=spacing, align="center")
     x = left + ((right - left) - (bounds[2] - bounds[0])) / 2
     y = top + max(0, ((bottom - top) - (bounds[3] - bounds[1])) / 2)
-    draw.multiline_text((x, y), wrapped, font=font, fill=fill, spacing=spacing, align="center")
+    draw.multiline_text(
+        (x, y), wrapped, font=font, fill=fill, spacing=spacing, align="center",
+        stroke_width=stroke, stroke_fill=stroke_fill,
+    )
+
+
+def _progress_dots(draw: ImageDraw.ImageDraw, size: tuple[int, int], index: int, total: int, accent: str, pale: str) -> None:
+    width, height = size
+    radius = max(3, round(height * .0042))
+    gap = radius * 4
+    row_width = (total - 1) * gap
+    y = round(height * .945)
+    start_x = (width - row_width) / 2
+    for dot in range(total):
+        x = start_x + dot * gap
+        box = (x - radius, y - radius, x + radius, y + radius)
+        if dot == index:
+            draw.ellipse(box, fill=accent)
+        else:
+            draw.ellipse(box, outline=pale, width=max(2, radius // 3))
 
 
 def create_cover_image(story: dict[str, Any], output_dir: Path, height: int) -> Path:
@@ -271,62 +357,97 @@ def create_cover_image(story: dict[str, Any], output_dir: Path, height: int) -> 
     output_dir.mkdir(parents=True, exist_ok=True)
     width = int(round(height * 9 / 16 / 2) * 2)
     dark, accent, pale = PALETTES[0]
-    image = Image.new("RGB", (width, height), dark)
+    base = _vertical_gradient((width, height), _hex(dark), _lerp_color(_hex(dark), (0, 0, 0), .45))
+    image = _glow_blobs(base, accent, pale)
+    image = _legibility_shade(image)
     draw = ImageDraw.Draw(image)
-    draw.ellipse((-width // 2, -height // 6, width * 3 // 4, height * 3 // 5), fill=accent)
-    draw.ellipse((width // 3, height // 2, width + width // 2, height + height // 4), fill="#07151a")
     margin = round(width * .085)
-    draw.rounded_rectangle((margin, round(height * .08), width - margin, round(height * .16)), radius=12, fill="#101f27")
-    draw.text((margin + 15, round(height * .103)), "CLIPLAB ORIGINAL STORY", font=_font(max(15, round(height * .017)), bold=True), fill=pale)
+    chip_top, chip_bottom = round(height * .08), round(height * .16)
+    draw.rounded_rectangle((margin, chip_top, width - margin, chip_bottom), radius=14, fill=accent)
+    chip_font = _font(max(15, round(height * .018)), bold=True)
+    chip_label = "CLIPLAB ORIGINAL STORY"
+    label_box = draw.textbbox((0, 0), chip_label, font=chip_font)
+    draw.text(
+        ((width - (label_box[2] - label_box[0])) / 2, (chip_top + chip_bottom - (label_box[3] - label_box[1])) / 2 - label_box[1]),
+        chip_label, font=chip_font, fill=dark,
+    )
     _draw_centered(
         draw,
-        (margin, round(height * .25), width - margin, round(height * .62)),
+        (margin, round(height * .24), width - margin, round(height * .60)),
         story["title"],
-        _font(max(34, round(height * .056)), bold=True),
+        _font(max(34, round(height * .058)), bold=True),
         "#ffffff",
         spacing=round(height * .012),
+        stroke=max(2, round(height * .0025)),
+        stroke_fill="#0b0f14",
     )
-    draw.line((margin, round(height * .71), width - margin, round(height * .71)), fill="#dfff38", width=max(4, round(height * .005)))
+    bar_width = round(width * .32)
+    draw.rounded_rectangle(
+        ((width - bar_width) / 2, round(height * .665), (width + bar_width) / 2, round(height * .665) + max(5, round(height * .007))),
+        radius=max(3, round(height * .003)), fill=accent,
+    )
     _draw_centered(
         draw,
-        (margin, round(height * .75), width - margin, round(height * .88)),
+        (margin, round(height * .73), width - margin, round(height * .90)),
         story["hook"],
-        _font(max(17, round(height * .021))),
+        _font(max(17, round(height * .022))),
         pale,
-        spacing=round(height * .006),
+        spacing=round(height * .007),
+        stroke=max(1, round(height * .0012)),
+        stroke_fill="#0b0f14",
     )
     path = output_dir / "cover.png"
     image.save(path, optimize=True)
     return path
 
 
-def create_scene_cards(story: dict[str, Any], output_dir: Path, height: int) -> list[Path]:
-    width = int(round(height * 9 / 16 / 2) * 2)
+def create_scene_cards(story: dict[str, Any], output_dir: Path, height: int, *, oversample: int = CARD_OVERSAMPLE) -> list[Path]:
+    """Render scene cards at 2x: ffmpeg zooms into them, so extra pixels keep it crisp."""
+    unit_height = height * max(1, oversample)
+    width = int(round(unit_height * 9 / 16 / 2) * 2)
     slides_dir = output_dir / "scenes"
     slides_dir.mkdir(parents=True, exist_ok=True)
+    total = len(story["scenes"])
     paths: list[Path] = []
     for index, scene in enumerate(story["scenes"], start=1):
         dark, accent, pale = PALETTES[(index - 1) % len(PALETTES)]
-        image = Image.new("RGB", (width, height), dark)
+        base = _vertical_gradient((width, unit_height), _hex(dark), _lerp_color(_hex(dark), (0, 0, 0), .5))
+        image = _glow_blobs(base, accent, pale)
+        image = _legibility_shade(image)
         draw = ImageDraw.Draw(image)
-        # Simple editorial geometry has no copyright/personality rights burden and is fast locally.
-        draw.ellipse((-width // 3, -height // 10, width // 2, height // 2), fill=accent)
-        draw.ellipse((width // 2, height // 2, width + width // 3, height + height // 5), fill="#101820")
         margin = round(width * .09)
-        draw.rounded_rectangle((margin, round(height * .09), width - margin, round(height * .15)), radius=12, outline=pale, width=2)
-        label_font = _font(max(15, round(height * .017)), bold=True)
-        draw.text((margin + 15, round(height * .105)), f"STORY REEL  /  {index:02}", font=label_font, fill=pale)
-        _draw_centered(
-            draw, (margin, round(height * .24), width - margin, round(height * .59)), scene["on_screen_text"],
-            _font(max(30, round(height * .052)), bold=True), "#ffffff", spacing=round(height * .011),
+        # Accent chip with the scene counter anchors the editorial layout.
+        chip_top, chip_bottom = round(unit_height * .085), round(unit_height * .145)
+        chip_font = _font(max(16, round(unit_height * .018)), bold=True)
+        chip_label = f"STORY  ·  {index:02}/{total:02}"
+        label_box = draw.textbbox((0, 0), chip_label, font=chip_font)
+        chip_width = (label_box[2] - label_box[0]) + round(width * .07)
+        draw.rounded_rectangle(
+            ((width - chip_width) / 2, chip_top, (width + chip_width) / 2, chip_bottom),
+            radius=round((chip_bottom - chip_top) / 2), fill=accent,
         )
-        draw.line((margin, round(height * .68), width - margin, round(height * .68)), fill=accent, width=max(4, round(height * .005)))
-        _draw_centered(
-            draw, (margin, round(height * .73), width - margin, round(height * .88)), scene["visual_prompt"],
-            _font(max(16, round(height * .020))), pale, spacing=round(height * .006),
+        draw.text(
+            ((width - (label_box[2] - label_box[0])) / 2, (chip_top + chip_bottom - (label_box[3] - label_box[1])) / 2 - label_box[1]),
+            chip_label, font=chip_font, fill=dark,
         )
+        _draw_centered(
+            draw, (margin, round(unit_height * .26), width - margin, round(unit_height * .58)), scene["on_screen_text"],
+            _font(max(30, round(unit_height * .056)), bold=True), "#ffffff", spacing=round(unit_height * .011),
+            stroke=max(2, round(unit_height * .0022)), stroke_fill="#0b0f14",
+        )
+        bar_width = round(width * .30)
+        draw.rounded_rectangle(
+            ((width - bar_width) / 2, round(unit_height * .63), (width + bar_width) / 2, round(unit_height * .63) + max(5, round(unit_height * .006))),
+            radius=max(3, round(unit_height * .003)), fill=accent,
+        )
+        _draw_centered(
+            draw, (margin, round(unit_height * .68), width - margin, round(unit_height * .80)), scene["visual_prompt"],
+            _font(max(16, round(unit_height * .019))), pale, spacing=round(unit_height * .006),
+            stroke=max(1, round(unit_height * .0011)), stroke_fill="#0b0f14",
+        )
+        _progress_dots(draw, (width, unit_height), index - 1, total, accent, pale)
         path = slides_dir / f"scene-{index:02}.jpg"
-        image.save(path, quality=93, optimize=True)
+        image.save(path, quality=92, optimize=True)
         paths.append(path)
     return paths
 
@@ -351,8 +472,9 @@ def synthesize_narration(text: str, language: str, output_file: Path, settings: 
         espeak = shutil.which("espeak-ng") or shutil.which("espeak")
         if espeak:
             voice = "ru" if language == "ru" else "en-us"
-            command = [espeak, "-v", voice, "-s", "155", "-w", str(output_file), "-f", str(text_file)]
-            log("Озвучиваю через локальный eSpeak NG (для более естественного голоса подключите Piper)…")
+            # A slower rate and small word gaps keep the synthetic fallback understandable.
+            command = [espeak, "-v", voice, "-s", "140", "-g", "6", "-w", str(output_file), "-f", str(text_file)]
+            log("Озвучиваю через локальный eSpeak NG. Для естественного голоса установите Piper-модель: python -m app.download_voice dmitri")
             run_command(command, log)
             engine = "eSpeak NG (локальный fallback)"
         else:
@@ -371,31 +493,74 @@ def synthesize_narration(text: str, language: str, output_file: Path, settings: 
     return engine
 
 
-def _story_words(story: dict[str, Any], duration: float) -> tuple[list[Word], list[float]]:
+# --- animated assembly ------------------------------------------------------
+
+
+def _scene_timeline(story: dict[str, Any], duration: float, fade: float, fps: int) -> tuple[list[Word], list[float]]:
+    """Word timings plus per-scene lengths on the finished crossfaded timeline.
+
+    Each scene is lengthened by its share of the crossfade overlap, so the final
+    video lasts about as long as the narration instead of shrinking by
+    (scenes - 1) * fade. Word cursors advance by scene_length - fade to match.
+    """
     scene_tokens = [scene["narration"].split() for scene in story["scenes"]]
     all_count = sum(len(tokens) for tokens in scene_tokens) or 1
-    words: list[Word] = []
-    durations: list[float] = []
-    cursor = 0.0
+    count = len(scene_tokens)
+    fade_share = fade * (count - 1) / count if count else 0.0
+    lengths: list[float] = []
     for tokens in scene_tokens:
-        scene_duration = max(2.8, duration * len(tokens) / all_count)
-        durations.append(scene_duration)
-        step = scene_duration / max(1, len(tokens))
+        raw = max(2.8, duration * len(tokens) / all_count) + fade_share
+        lengths.append(round(raw * fps) / fps)
+    words: list[Word] = []
+    cursor = 0.0
+    for tokens, scene_length in zip(scene_tokens, lengths):
+        step = scene_length / max(1, len(tokens))
         for index, token in enumerate(tokens):
             words.append(Word(cursor + index * step, cursor + (index + 1) * step * .92, token))
-        cursor += scene_duration
-    return words, durations
+        cursor += scene_length - fade
+    return words, lengths
 
 
-def _concat_file(paths: list[Path], durations: list[float], output: Path) -> None:
-    lines: list[str] = []
-    for path, duration in zip(paths, durations):
-        escaped = str(path.resolve()).replace("'", r"'\\''")
-        lines.extend([f"file '{escaped}'", f"duration {duration:.3f}"])
-    # ffmpeg concat applies the previous duration only when another input follows.
-    escaped_last = str(paths[-1].resolve()).replace("'", r"'\\''")
-    lines.append(f"file '{escaped_last}'")
-    output.write_text("\n".join(lines) + "\n", encoding="utf-8")
+def build_story_filtergraph(
+    scene_lengths: list[float],
+    width: int,
+    height: int,
+    *,
+    fade: float = CROSSFADE_SECONDS,
+    fps: int = STORY_FPS,
+    zoom: float = KEN_BURNS_ZOOM,
+    subtitle_path: str | None = None,
+) -> str:
+    """Ken Burns zoom per card, crossfades between scenes, optional burned captions.
+
+    Scene cards are rendered at 2x size; zoompan crops the output window from the
+    oversized source, which is the standard trick against zoompan pixel jitter.
+    """
+    branches: list[str] = []
+    for index, length in enumerate(scene_lengths):
+        frames = max(fps, int(round(length * fps)))
+        if index % 2 == 0:
+            zoom_expr = f"1+{zoom}*on/{frames}"
+        else:
+            zoom_expr = f"1+{zoom}-{zoom}*on/{frames}"
+        branches.append(
+            f"[{index}:v]zoompan=z='{zoom_expr}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
+            f"d={frames}:s={width}x{height}:fps={fps},format=yuv420p,setsar=1,settb=AVTB[v{index}]"
+        )
+    current = "v0"
+    elapsed = scene_lengths[0] if scene_lengths else 0.0
+    for index in range(1, len(scene_lengths)):
+        offset = elapsed - fade
+        branches.append(
+            f"[{current}][v{index}]xfade=transition=fade:duration={fade:.3f}:offset={max(0.0, offset):.3f}[x{index}]"
+        )
+        current = f"x{index}"
+        elapsed = offset + scene_lengths[index]
+    if subtitle_path:
+        branches.append(f"[{current}]subtitles=filename='{subtitle_path}'[vout]")
+    else:
+        branches.append(f"[{current}]format=yuv420p[vout]")
+    return ";".join(branches)
 
 
 def render_story(story: dict[str, Any], job: dict[str, Any], settings: Settings, output_dir: Path, log: Log) -> dict[str, Any]:
@@ -405,33 +570,32 @@ def render_story(story: dict[str, Any], job: dict[str, Any], settings: Settings,
     voice_file = output_dir / "narration.wav"
     voice_engine = synthesize_narration(narration, job["language"], voice_file, settings, log)
     audio_duration = probe_duration(voice_file, log)
-    words, scene_durations = _story_words(story, audio_duration)
+    words, scene_lengths = _scene_timeline(story, audio_duration, CROSSFADE_SECONDS, STORY_FPS)
     cover = create_cover_image(story, output_dir, height)
     cards = create_scene_cards(story, output_dir, height)
-    concat = output_dir / "scenes.txt"
-    _concat_file(cards, scene_durations, concat)
-    silent_video = output_dir / "visuals.mp4"
-    log("Собираю вертикальные сторис-карточки…")
-    run_command([
-        ffmpeg_executable(), "-y", "-f", "concat", "-safe", "0", "-i", str(concat),
-        # The concat manifest owns every scene duration. A zoompan `d=1` here
-        # would collapse a 45-second story into one frame per card, so retain
-        # source timing and render it at a stable mobile-friendly frame rate.
-        "-vf", "fps=30,format=yuv420p",
-        "-threads", str(settings.ffmpeg_threads), "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", str(silent_video),
-    ], log)
     srt_file = output_dir / "story.srt"
     ass_file = output_dir / "story.ass"
     write_captions(words, 0, width, height, srt_file, ass_file)
-    output_video = output_dir / "story-reel.mp4"
     subtitle = str(ass_file).replace("\\", "\\\\").replace(":", "\\:").replace("'", r"\'")
-    log("Вшиваю субтитры и аудиодорожку в итоговый ролик…")
-    run_command([
-        ffmpeg_executable(), "-y", "-i", str(silent_video), "-i", str(voice_file),
-        "-vf", f"subtitles=filename='{subtitle}'", "-map", "0:v", "-map", "1:a", "-shortest",
-        "-threads", str(settings.ffmpeg_threads), "-c:v", "libx264", "-preset", "veryfast", "-crf", "20", "-c:a", "aac", "-b:a", "160k",
-        "-movflags", "+faststart", str(output_video),
-    ], log)
+    graph = build_story_filtergraph(scene_lengths, width, height, subtitle_path=subtitle)
+    output_video = output_dir / "story-reel.mp4"
+    audio_index = len(cards)
+    fade_out_start = max(0.0, audio_duration - 0.8)
+    graph += (
+        f";[{audio_index}:a]aresample=44100,afade=t=in:st=0:d=0.25,"
+        f"afade=t=out:st={fade_out_start:.3f}:d=0.8[aout]"
+    )
+    command = [ffmpeg_executable(), "-y"]
+    for card in cards:
+        command.extend(["-i", str(card)])
+    command.extend(["-i", str(voice_file)])
+    command.extend([
+        "-filter_complex", graph, "-map", "[vout]", "-map", "[aout]", "-shortest",
+        "-threads", str(settings.ffmpeg_threads), "-c:v", "libx264", "-preset", "veryfast", "-crf", "20",
+        "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", str(output_video),
+    ])
+    log("Собираю анимированный Story Reel: плавный зум карточек, переходы и вшитые субтитры…")
+    run_command(command, log)
     if not output_video.is_file() or output_video.stat().st_size < 1024:
         raise PipelineError("Не удалось собрать итоговый Story Reel.")
     return {
